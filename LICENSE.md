@@ -1,6 +1,7 @@
 # MIT License
 
 Copyright (c) 2026 Forbes Automotive
+Copyright (c) 2026 Luca C (louij2) - modifications in this fork
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

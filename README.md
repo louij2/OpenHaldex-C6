@@ -10,6 +10,13 @@
 
 # OpenHaldex — ESP32‑C6 Haldex Controller
 
+> **This is a fork.** Upstream is
+> [Forbes-Automotive/OpenHaldex-C6](https://github.com/Forbes-Automotive/OpenHaldex-C6)
+> and the hardware and most of the firmware are their work (MIT). This fork
+> carries fixes that are open upstream, builds its releases in CI, and points
+> the OTA updater at its own releases. See **[FORK.md](FORK.md)** for what
+> differs, the release process, and how to switch back to upstream builds.
+
 <p align="center">
 
 ![Version](https://img.shields.io/github/v/release/Forbes-Automotive/OpenHaldex-C6)

@@ -2,7 +2,13 @@
 #include <OpenHaldexC6_defs.h>
 
 // Current firmware version
-#define FW_VERSION "9.00.0" // also bump data/version.json ("fs")
+#define FW_VERSION "9.10.0" // also bump data/version.json ("fs")
+
+// Fork versioning: upstream (Forbes-Automotive) numbers releases X.00.Y - the
+// middle field is always 00. This fork uses the middle field instead (9.10.0,
+// 9.11.0 for features; 9.10.1 for fixes), so our versions sort above the
+// upstream release they branched from and can never collide with one of theirs.
+// Digits and dots only: the updater's folder regex rejects any suffix.
 
 /*
 Version Control:
@@ -168,6 +174,29 @@ V9.00.0 - shared Forbes Automotive UI theme; automatic product web-asset
           revalidation, 304 when unchanged) instead of max-age=1y + a hand-
           bumped ?v= that kept being forgotten - phones were running a stale
           app.js against new HTML, so buttons on new cards did nothing.
+
+--- fork point: everything below is this fork, not upstream -----------------
+
+V9.10.0 - first release of the louij2 fork (MIT, upstream remains
+          Forbes-Automotive/OpenHaldex-C6). Versioning moves to the middle
+          field so our releases sort above the upstream cut they branched from
+          and cannot collide with theirs.
+        - OTA updater now points at this repo, so devices running this firmware
+          are offered this fork's releases.
+        - tools/make_release.py added: builds Releases/releases.json from the
+          actual binaries, with `verify` (CI-enforced) and `reindex`
+          subcommands. Upstream had no committed release tooling, and its index
+          had drifted from the files - V9.00.0's firmware was re-uploaded on
+          2026-09-30 after the index was written on 2026-09-20 (+8576 bytes),
+          and V8.00.3's entry was back-filled 192 bytes short. Both are
+          corrected here, and `verify` now fails the build if the index and the
+          binaries ever disagree again. Note upstream removed the OTA
+          upload-stream SHA gate in 9.00.0 rather than fix this, so a drifted
+          index was invisible to users.
+        - Carried the four PRs upstream left open: WiFi bridge mode / backup &
+          restore / bench mode follow-ups (#40 CLI legacy key), favicon + PWA
+          branding (#41), vehicle geometry settings (#42), and the OTA "Latest
+          build" channel (#43).
 
 */
 
