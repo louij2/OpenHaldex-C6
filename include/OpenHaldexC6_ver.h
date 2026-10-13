@@ -2,7 +2,7 @@
 #include <OpenHaldexC6_defs.h>
 
 // Current firmware version
-#define FW_VERSION "9.10.0" // also bump data/version.json ("fs")
+#define FW_VERSION "9.10.1" // also bump data/version.json ("fs")
 
 // Fork versioning: upstream (Forbes-Automotive) numbers releases X.00.Y - the
 // middle field is always 00. This fork uses the middle field instead (9.10.0,
@@ -197,6 +197,16 @@ V9.10.0 - first release of the louij2 fork (MIT, upstream remains
           restore / bench mode follow-ups (#40 CLI legacy key), favicon + PWA
           branding (#41), vehicle geometry settings (#42), and the OTA "Latest
           build" channel (#43).
+
+V9.10.1 - removed the dead "Generation 3 - Volvo" option from the Haldex
+          Generation dropdown. There is no generation-3 code anywhere in the
+          firmware and /api/settings rejects the value outright (API.cpp accepts
+          only 1/2/4/41/50/51/52), so selecting it was silently ignored - a
+          Volvo owner would read the option as support that does not exist.
+        - README: hardware badge said "Gen1 | Gen2 | Gen4" and omitted Gen5
+          entirely; the body text filed all of Gen5 under MQB when 0AY is
+          PQ-based. Both corrected, and the badges now point at this fork
+          rather than reporting upstream's release and commit activity.
 
 */
 

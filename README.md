@@ -19,16 +19,17 @@
 
 <p align="center">
 
-![Version](https://img.shields.io/github/v/release/Forbes-Automotive/OpenHaldex-C6)
-![GitHub stars](https://img.shields.io/github/stars/Forbes-Automotive/OpenHaldex-C6)
-![Last commit](https://img.shields.io/github/last-commit/Forbes-Automotive/OpenHaldex-C6)
+![Version](https://img.shields.io/github/v/release/louij2/OpenHaldex-C6)
+![GitHub stars](https://img.shields.io/github/stars/louij2/OpenHaldex-C6)
+![Last commit](https://img.shields.io/github/last-commit/louij2/OpenHaldex-C6)
 ![Platform](https://img.shields.io/badge/platform-ESP32--C6-blue)
-![Hardware](https://img.shields.io/badge/hardware-Haldex%20Gen1%20%7C%20Gen2%20%7C%20Gen4-green)
-[![Install Firmware](https://img.shields.io/badge/Install%20Firmware-Click%20Here-success?style=for-the-badge)](https://forbes-automotive.com/pages/module-software-updater)
+![Hardware](https://img.shields.io/badge/hardware-Haldex%20Gen1%20%7C%20Gen2%20%7C%20Gen4%20%7C%20Gen5-green)
+[![Download Firmware](https://img.shields.io/badge/Download%20Firmware-Latest%20Release-success?style=for-the-badge)](https://github.com/louij2/OpenHaldex-C6/releases/latest)
 
 </p>
 
-OpenHaldex is an **open-source Haldex AWD controller** for Volkswagen and Audi Group vehicles using Haldex Generation 1, 2, 4 (PQ Chassis) and 5 (MQB) differentials. The full source and hardware files are published under the permissive **MIT License**, so anyone is free to use, modify, and redistribute them, and it incorporates MIT‑licensed upstream work — see [Licensing](#licensing).
+OpenHaldex is an **open-source Haldex AWD controller** for Volkswagen and Audi Group vehicles using Haldex Generation 1, 2, 4 (PQ chassis, including the GM/SAAB variant) and
+5 differentials — Gen5 covering MQB 0CQ, 0CQ VAQ, and the PQ-based 0AY. The full source and hardware files are published under the permissive **MIT License**, so anyone is free to use, modify, and redistribute them, and it incorporates MIT‑licensed upstream work — see [Licensing](#licensing).
 
 Install is easy with the new harnesses for later PQ & MQB chassis:
 
