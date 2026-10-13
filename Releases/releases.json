@@ -1,7 +1,24 @@
 {
   "product": "OpenHaldex-C6",
-  "latest": "9.00.0",
+  "latest": "9.10.0",
   "releases": [
+    {
+      "version": "9.10.0",
+      "channel": "stable",
+      "date": "2026-10-13",
+      "ota": true,
+      "notes": "Release 9.10.0 - see the GitHub release notes.",
+      "firmware": {
+        "path": "V9.10.0/firmware.bin",
+        "size": 1322176,
+        "sha256": "86feb2d8c166e783e34fa97f3268c6d376f941b834a780e887311e84d00f055d"
+      },
+      "filesystem": {
+        "path": "V9.10.0/littlefs.bin",
+        "size": 720896,
+        "sha256": "d514da6f8f750ab1466a027ee3f8fba19655560b42af7f2429687b0862eb3962"
+      }
+    },
     {
       "version": "9.00.0",
       "channel": "stable",
