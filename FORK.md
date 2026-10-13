@@ -49,10 +49,13 @@ python3 tools/make_release.py add 9.10.0 \
     --firmware   .pio/build/esp32c6/firmware.bin \
     --filesystem .pio/build/esp32c6/littlefs.bin \
     --bootloader .pio/build/esp32c6/bootloader.bin \
-    --partitions .pio/build/esp32c6/partitions.bin \
-    --notes "..."
+    --partitions .pio/build/esp32c6/partitions.bin
 python3 tools/make_release.py verify
 ```
+
+Notes are taken from that version's changelog entry in `OpenHaldexC6_ver.h`
+automatically, so write them there and nowhere else. `--notes` or `--notes-file`
+override it if you need to.
 
 ## The release-index problem this fixes
 
@@ -94,6 +97,16 @@ it cannot recover what a stale entry was meant to describe.
 ## Open work
 
 Gen5 0AY (generation 51) lock behaviour is under investigation — a car reported
-staying FWD in every forced mode. Candidate causes are tracked on a branch and
-deliberately **not** in a release: they change how a real car's AWD engages, so
-they need a road test before they ship to anyone. See `docs/gen51-notes.md`.
+staying FWD in every forced mode, with the engagement gauge showing lock anyway.
+
+Three candidates are written up in **[docs/gen51-notes.md](docs/gen51-notes.md)**
+with the evidence for each. The first — a V9.00.0 regression where the
+speed/throttle gate began applying to force modes and Expert, which previously
+bypassed it — is mitigated in 9.10.1: the dashboard now names the setting
+withholding lock instead of showing a bare "Target: 0%". That is reporting only
+and changes no lock behaviour.
+
+The other two would change how a real car engages AWD and are deliberately
+**not** in any release until a capture says which is right.
+**[docs/gen51-car-test.md](docs/gen51-car-test.md)** is the protocol that
+resolves all three in one session.
