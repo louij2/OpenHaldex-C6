@@ -7,7 +7,7 @@
       "channel": "stable",
       "date": "2026-10-13",
       "ota": true,
-      "notes": "Release 9.10.0 - see the GitHub release notes.",
+      "notes": "first release of the louij2 fork (MIT, upstream remains Forbes-Automotive/OpenHaldex-C6). Versioning moves to the middle field so our releases sort above the upstream cut they branched from and cannot collide with theirs; OTA updater now points at this repo, so devices running this firmware are offered this fork's releases; tools/make_release.py added: builds Releases/releases.json from the actual binaries, with `verify` (CI-enforced) and `reindex` subcommands. Upstream had no committed release tooling, and its index had drifted from the files - V9.00.0's firmware was re-uploaded on 2026-09-30 after the index was written on 2026-09-20 (+8576 bytes), and V8.00.3's entry was back-filled 192 bytes short. Both are corrected here, and `verify` now fails the build if the index and the binaries ever disagree again. Note upstream removed the OTA upload-stream SHA gate in 9.00.0 rather than fix this, so a drifted index was invisible to users; Carried the four PRs upstream left open: WiFi bridge mode / backup & restore / bench mode follow-ups (#40 CLI legacy key), favicon + PWA branding (#41), vehicle geometry settings (#42), and the OTA \"Latest build\" channel (#43)",
       "firmware": {
         "path": "V9.10.0/firmware.bin",
         "size": 1322176,
@@ -85,6 +85,142 @@
         "path": "V8.00.1/littlefs.bin",
         "size": 720896,
         "sha256": "3855ea567436b38a53720b9d81d806f7ac4eb2f5a4f6b5ec6fe51c917929dcdd"
+      }
+    },
+    {
+      "version": "7.00.0",
+      "channel": "stable",
+      "date": "2026-05-27",
+      "ota": false,
+      "notes": "Added Gen5 (0AY) Haldex support - a Gen2/Gen4 mix on a Gen5 chassis.",
+      "firmware": {
+        "path": "V7.00.0/firmware.bin",
+        "size": 1245216,
+        "sha256": "11bda1d4b96af041b160829331eef65667674b0a396dd9aa94f7c479e7b5dc01"
+      },
+      "filesystem": {
+        "path": "V7.00.0/littlefs.bin",
+        "size": 720896,
+        "sha256": "d2ecce72f0b890329317007ba3d01a47c63e1be1de1581d5c75eca0afa7373d7"
+      }
+    },
+    {
+      "version": "6.01.0",
+      "channel": "stable",
+      "date": "2026-05-18",
+      "ota": false,
+      "notes": "WiFi naming, better low-power sleep, Follow Hazard force mode and hazard source selection.",
+      "firmware": {
+        "path": "V6.01.0/firmware.bin",
+        "size": 1243472,
+        "sha256": "cea8c5b401b1e2234d81e0d1e780b1d9bd73966e8635d101ae17837ce244321d"
+      },
+      "filesystem": {
+        "path": "V6.01.0/littlefs.bin",
+        "size": 720896,
+        "sha256": "85b8e7b97aa76d802cf831d6ecbf8bdc469b947fa5a2c69a8437d035446654cf"
+      }
+    },
+    {
+      "version": "6.00.0",
+      "channel": "stable",
+      "date": "2026-05-10",
+      "ota": false,
+      "notes": "Interrupt-based CAN handling, LED brightness, revised hazard force mode and sleep config.",
+      "firmware": {
+        "path": "V6.00.0/firmware.bin",
+        "size": 1237488,
+        "sha256": "95bfb8bd6e2a7144a4c43be00cfd5a4b1056c0dd52d9ac78a0c98500e6023160"
+      },
+      "filesystem": {
+        "path": "V6.00.0/littlefs.bin",
+        "size": 720896,
+        "sha256": "8ce99a557d6ee856676743357291d8455f66cc207f460e799e3a29cdb2de021d"
+      }
+    },
+    {
+      "version": "5.00.0",
+      "channel": "stable",
+      "date": "2026-05-08",
+      "ota": false,
+      "notes": "Added the Fix Hunting option (Motor_11 BPK packing) for 554K controllers.",
+      "firmware": {
+        "path": "V5.00.0/firmware.bin",
+        "size": 1232464,
+        "sha256": "d368f07ba5d2cd43a4f711f972f9053b6a79ada4a0c1dee149731bf08ed69fd8"
+      },
+      "filesystem": {
+        "path": "V5.00.0/littlefs.bin",
+        "size": 720896,
+        "sha256": "42c70474cdefc0015169ab281ad820508626ba46bc3321f398ed2a4e26e1c50b"
+      }
+    },
+    {
+      "version": "4.00.2",
+      "channel": "stable",
+      "date": "2026-05-07",
+      "ota": false,
+      "notes": "Added password protection (4.00.0 Gen41 dual-bus, 4.00.1 low-power mode).",
+      "firmware": {
+        "path": "V4.00.2/firmware.bin",
+        "size": 1232336,
+        "sha256": "7a681ec451b1ac5691f25dcde2ab161587ca90887f1840765c60e5c540b6904c"
+      },
+      "filesystem": {
+        "path": "V4.00.2/littlefs.bin",
+        "size": 720896,
+        "sha256": "e2ef59384f76979b030ad520c93cfcd58c4e4daa3f8db6c384acd9abe3b17436"
+      }
+    },
+    {
+      "version": "3.00.1",
+      "channel": "stable",
+      "date": "2026-04-05",
+      "ota": false,
+      "notes": "Added Disable Onboard/External Button options and the Learn Haldex function.",
+      "firmware": {
+        "path": "V3.00.1/firmware.bin",
+        "size": 1221808,
+        "sha256": "bdd8ae2063a40e20acc8e3d23fb5b92d54e6d68dbc8362be4acc2a30f78e9693"
+      },
+      "filesystem": {
+        "path": "V3.00.1/littlefs.bin",
+        "size": 720896,
+        "sha256": "280f37aa05fa6e065f7f38ca2e6795b8eeac7e3297fd444199c06db481d9334a"
+      }
+    },
+    {
+      "version": "3.00.0",
+      "channel": "stable",
+      "date": "2026-04-02",
+      "ota": false,
+      "notes": "Added Gen5 support and Gen4 GM/SAAB (logged as generation 41).",
+      "firmware": {
+        "path": "V3.00.0/firmware.bin",
+        "size": 1215472,
+        "sha256": "f7b93a6fd6ad23f3833c3524e0d5eb4ca956478b1c1e57c727abb40f5f58991e"
+      },
+      "filesystem": {
+        "path": "V3.00.0/littlefs.bin",
+        "size": 720896,
+        "sha256": "8ed9c44ddc76703e5918361997b53cdadefa76c9c5cb61ecf0de118e7ee57c27"
+      }
+    },
+    {
+      "version": "2.10.1",
+      "channel": "stable",
+      "date": "2026-03-29",
+      "ota": false,
+      "notes": "Fixed CAN health always reporting Unhealthy.",
+      "firmware": {
+        "path": "V2.10.1/firmware.bin",
+        "size": 1209344,
+        "sha256": "b1d36eaf55407b4fe6c4865e57c66e8b47a1e2f5010878a05f6950ac722814fd"
+      },
+      "filesystem": {
+        "path": "V2.10.1/littlefs.bin",
+        "size": 720896,
+        "sha256": "905129b62a9e04ebd8b9b7aca03513aad5bdab8f246cce2d101247a5d1f20be5"
       }
     }
   ]

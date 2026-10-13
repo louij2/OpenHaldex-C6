@@ -207,6 +207,26 @@ V9.10.1 - removed the dead "Generation 3 - Volvo" option from the Haldex
           entirely; the body text filed all of Gen5 under MQB when 0AY is
           PQ-based. Both corrected, and the badges now point at this fork
           rather than reporting upstream's release and commit activity.
+        - Dashboard now says WHY lock is being withheld. From 9.00.0 the
+          speed/throttle window gates every lock path - the force-mode triggers
+          and Expert used to bypass it - so an inherited non-zero "Disengage
+          Under Speed" or "Minimum Throttle" silently zeroes lock in every mode
+          and the only symptom was "Target: 0%". /api/dashboard now reports
+          lockGated + lockGateReasons and the UI names the setting and its
+          configured value. lock_enabled() is defined in terms of the new
+          lock_gate_blocking() so the stated reason cannot drift from the
+          decision actually taken; lock behaviour itself is unchanged.
+        - Release notes now come from this changelog (make_release.py reads the
+          entry for the version being built) instead of a placeholder string,
+          and nothing from a commit message is interpolated into a shell
+          argument in CI. 9.10.0's own entry was backfilled the same way.
+        - Indexed the eight historical releases inherited from upstream
+          (2.10.1 through 7.00.0) with real hashes, so `verify --strict` is
+          clean and every published folder is accounted for. They are marked
+          ota:false - documented and downloadable, but not offered for
+          push-button OTA, since they predate the current OTA page and pushing
+          one over the air would strand the unit's updater. Use Update from
+          Files for those. The set offered to devices is unchanged.
 
 */
 

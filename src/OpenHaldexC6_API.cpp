@@ -209,6 +209,24 @@ static void statusOutgoing(AsyncWebServerRequest *request)
 
     data["lockTarget"] = int(lock_target);
 
+    // Why lock is being withheld, when it is. Stock mirrors the Haldex and FWD
+    // asks for zero on purpose, so neither is gated; every other mode goes
+    // through the speed/throttle window. Without this, a user whose saved
+    // "Disengage Under Speed" or "Minimum Throttle" is zeroing lock sees only a
+    // bare "Requested 0%" with nothing to explain it.
+    {
+        const bool modeGated = !(state.mode == MODE_STOCK || state.mode == MODE_FWD);
+        const uint8_t blocking = modeGated ? lock_gate_blocking() : 0;
+        data["lockGated"] = (blocking != 0);
+        JsonArray gates = data["lockGateReasons"].to<JsonArray>();
+        if (blocking & LOCK_GATE_THROTTLE)
+            gates.add("throttle");
+        if (blocking & LOCK_GATE_UNDER_SPEED)
+            gates.add("underSpeed");
+        if (blocking & LOCK_GATE_ABOVE_SPEED)
+            gates.add("aboveSpeed");
+    }
+
     if (haldexOk) // if haldex CAN ok set related values
     {
         data["lockActual"] = received_haldex_engagement;

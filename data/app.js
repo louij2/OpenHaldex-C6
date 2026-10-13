@@ -347,6 +347,12 @@ async function refreshStatus() {
     document.getElementById("engagementFill").style.width =
       `${data.lockActual ?? 0}%`;
 
+    // Say why lock is being withheld. From 9.00.0 the speed/throttle window
+    // gates every mode including the force-mode triggers and Expert, which used
+    // to bypass it - so an inherited non-zero setting can zero lock everywhere
+    // and the only visible symptom was "Target: 0%".
+    updateLockGateHint(data);
+
     // Steering-angle reduction band on the engagement bar: shows the portion of
     // the requested lock that the steering angle is holding back (cap -> request).
     {
@@ -3107,6 +3113,43 @@ function updateTileGauges() {
     const frac = Math.max(0, Math.min(1, (raw - t.min) / (t.max - t.min || 1)));
     fillEl.style.strokeDasharray = `${(TG_ARC * frac).toFixed(2)} ${TG_CIRC.toFixed(2)}`;
   });
+}
+
+// Explain a withheld lock. The device reports which of the three gates in the
+// speed/throttle window is blocking (lockGateReasons); naming the setting and
+// its configured value is the difference between "it is broken" and "turn this
+// down". Hidden whenever nothing is blocking.
+// The configured limit is read back off the Settings sliders, which
+// initStoredSettings() populates from /api/settings and keeps in sync - there is
+// no cached settings object to consult. Missing element -> bare reason, no value.
+const gateLimit = (id, unit) => {
+  const el = document.getElementById(id);
+  return el && el.value !== "" ? ` (${el.value}${unit})` : "";
+};
+
+const LOCK_GATE_TEXT = {
+  throttle: () =>
+    `throttle is below "Minimum Throttle Before Lock"${gateLimit("disableThrottleRange", "%")}`,
+  underSpeed: () =>
+    `speed is below "Disengage Under Speed"${gateLimit("disengageUnderSpeedRange", " km/h")}`,
+  aboveSpeed: () =>
+    `speed is above "Disengage Above Speed"${gateLimit("disengageAboveSpeedRange", " km/h")}`,
+};
+
+function updateLockGateHint(data) {
+  const el = document.getElementById("lockGateHint");
+  if (!el) return;
+  const reasons = Array.isArray(data.lockGateReasons) ? data.lockGateReasons : [];
+  if (!data.lockGated || !reasons.length) {
+    el.hidden = true;
+    el.textContent = "";
+    return;
+  }
+  const parts = reasons.map((r) => (LOCK_GATE_TEXT[r] ? LOCK_GATE_TEXT[r]() : r));
+  el.textContent =
+    `Lock is being held at 0% because ${parts.join(" and ")}. ` +
+    `Set the limit to 0 in Settings to disable that cut-off.`;
+  el.hidden = false;
 }
 
 // Semi-circular engagement gauge: the fill sweeps with ACTUAL engagement, the

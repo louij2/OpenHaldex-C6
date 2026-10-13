@@ -62,14 +62,17 @@ jobs:
           pio run -e esp32c6
           pio run -e esp32c6 -t buildfs
 
+      # No --notes: make_release.py takes them from this version's changelog
+      # entry in include/OpenHaldexC6_ver.h, so the notes shown in the device's
+      # update list are the ones already written there. Nothing from the commit
+      # message is interpolated into a shell argument.
       - name: Stage and index the release
         run: |
           python3 tools/make_release.py add "${{ steps.ver.outputs.version }}" \
             --firmware   .pio/build/esp32c6/firmware.bin \
             --filesystem .pio/build/esp32c6/littlefs.bin \
             --bootloader .pio/build/esp32c6/bootloader.bin \
-            --partitions .pio/build/esp32c6/partitions.bin \
-            --notes "Release ${{ steps.ver.outputs.version }} - see the GitHub release notes."
+            --partitions .pio/build/esp32c6/partitions.bin
           python3 tools/make_release.py verify
 
       - name: Commit the release to main

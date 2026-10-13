@@ -97,6 +97,44 @@ def write_index(index):
         f.write("\n")
 
 
+VER_HEADER = os.path.join(REPO_ROOT, "include", "OpenHaldexC6_ver.h")
+
+
+def notes_from_changelog(version):
+    """Pull this version's entry out of the changelog in OpenHaldexC6_ver.h.
+
+    The changelog is the one place release notes are already written, so taking
+    them from there beats maintaining a second copy - and beats interpolating a
+    commit message into a shell argument in CI. Returns "" if there is no entry.
+    """
+    try:
+        text = open(VER_HEADER).read()
+    except OSError:
+        return ""
+    # Entry starts at "V<version> - " and runs until the next V<n>.<n> heading
+    # or the end of the comment block.
+    start = re.search(r"^V" + re.escape(version) + r"\s*-\s*", text, re.M)
+    if not start:
+        return ""
+    rest = text[start.end():]
+    end = re.search(r"^(?:V\d|\*/|---)", rest, re.M)
+    body = rest[: end.start()] if end else rest
+    # Flatten: the changelog is hard-wrapped and bullet-indented.
+    lines = [ln.strip() for ln in body.splitlines()]
+    out, cur = [], []
+    for ln in lines:
+        if ln.startswith("- "):
+            if cur:
+                out.append(" ".join(cur))
+            cur = [ln[2:].strip()]
+        elif ln:
+            cur.append(ln)
+    if cur:
+        out.append(" ".join(cur))
+    joined = "; ".join(p.rstrip(". ") for p in out if p)
+    return re.sub(r"\s+", " ", joined).strip()
+
+
 def cmd_add(args):
     if not FOLDER_RE.match("V" + args.version):
         sys.exit(f"Version {args.version!r} must be digits and dots only (e.g. 9.10.0) "
@@ -111,9 +149,20 @@ def cmd_add(args):
         if not sources[kind]:
             sys.exit(f"--{kind} is required (an OTA needs both firmware and filesystem).")
 
+    notes = args.notes
+    if args.notes_file:
+        notes = open(args.notes_file).read().strip()
+    elif not notes:
+        notes = notes_from_changelog(args.version)
+        if notes:
+            print(f"  notes taken from the {args.version} changelog entry")
+        else:
+            print(f"  WARNING: no changelog entry for V{args.version} - notes will be empty. "
+                  f"Add one to include/OpenHaldexC6_ver.h.")
+
     entry = {"version": args.version, "channel": args.channel,
              "date": args.date or datetime.date.today().isoformat(),
-             "ota": not args.no_ota, "notes": args.notes}
+             "ota": not args.no_ota, "notes": notes}
 
     for kind, name in INDEXED + EXTRA:
         src = sources.get(kind)
@@ -233,7 +282,9 @@ def main():
     a.add_argument("--filesystem", required=True)
     a.add_argument("--bootloader")
     a.add_argument("--partitions")
-    a.add_argument("--notes", default="")
+    a.add_argument("--notes", default="",
+                   help="release notes; omit to take them from this version's changelog entry")
+    a.add_argument("--notes-file", help="read notes from this file instead")
     a.add_argument("--channel", default="stable", choices=["stable", "beta"])
     a.add_argument("--date", help="YYYY-MM-DD (default: today)")
     a.add_argument("--no-ota", action="store_true",
