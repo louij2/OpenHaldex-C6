@@ -1,7 +1,24 @@
 {
   "product": "OpenHaldex-C6",
-  "latest": "9.10.1",
+  "latest": "9.11.0",
   "releases": [
+    {
+      "version": "9.11.0",
+      "channel": "stable",
+      "date": "2026-10-16",
+      "ota": true,
+      "notes": "OTA tab: \"Release source\" switch between this fork and the official Forbes Automotive releases. On the Forbes source every stable official release is offered as a switch back (not hidden as a rollback), the install button and confirmation say so plainly, and the fork-only \"Latest build\" channel and rebuild check are hidden. Installing one returns the unit to the official firmware, whose own updater follows Forbes from then on; the hint and confirmation name the fork's website as the way back. Kept in this browser only; Phone install guide published at louij2.github.io/OpenHaldex-C6 (site/, deployed by .github/workflows/pages.yml): iPhone-only steps in English and Italian, download buttons that always point at the latest release, and official Forbes files for going back; The guide deliberately uploads FIRMWARE FIRST when coming from upstream 9.00.0. Seven different 9.00.0 binaries were published; the five before 16:04 on 2026-09-20 still answer \"200 OK\" after the first upload chunk (the bug 9.00.0's own changelog calls the root cause of OTA never completing) and write the filesystem while it is mounted, with no recovery page. On those, a cut-short firmware upload is refused by esp_ota_end and the unit keeps its old firmware, whereas a cut-short filesystem upload can boot-loop it. Firmware first means the filesystem then goes through this fork's fixed uploader",
+      "firmware": {
+        "path": "V9.11.0/firmware.bin",
+        "size": 1322736,
+        "sha256": "12f65281d8cc14391353c1df894f525fd83ae182b3155fe44c917f26240c25ac"
+      },
+      "filesystem": {
+        "path": "V9.11.0/littlefs.bin",
+        "size": 720896,
+        "sha256": "8366d497032df2016ade42700c78dd68dd33c430ebb063d9d0a0c3449f52fbdd"
+      }
+    },
     {
       "version": "9.10.1",
       "channel": "stable",
