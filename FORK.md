@@ -29,6 +29,25 @@ done its job.
 - **Switching back to Forbes** from a running fork: OTA tab → *Release source* →
   *Forbes Automotive (official)* → *Check for updates* → *Switch to official*.
 
+## Staying in sync with upstream
+
+Upstream has merged this fork's PRs #39–#43, so most of the old difference is
+gone. Upstream fixes are brought over **by cherry-pick**, not by merging
+`upstream/main`, because upstream 9.00.5+ moved to a new flash layout for
+Bluetooth (#44): app slots 0x1C0000, LittleFS 0x70000. A partition table
+cannot be changed over OTA, so adopting it would force every unit through a USB
+flash and break the phone-only install path. This fork keeps the original
+0x1A0000 / 0xB0000 layout.
+
+Last sync: upstream `4215b76` (9.00.6) → fork 9.12.0, taking #45, #46, #47, #51
+and the #49 line-ending normalisation. Deliberately not taken: #44 and anything
+that needs the new layout.
+
+To sync again: `git fetch upstream`, list `git log <last-synced>..upstream/main`,
+and cherry-pick with `-x -Xrenormalize`, skipping anything that touches
+`src/partitions_4mb.csv`, BLE (`OpenHaldexC6_BLE.*`, NimBLE in `platformio.ini`)
+or the platform version.
+
 ## Release process
 
 Releases are never built by hand. To cut one:

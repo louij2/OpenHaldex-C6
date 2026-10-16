@@ -2,7 +2,7 @@
 #include <OpenHaldexC6_defs.h>
 
 // Current firmware version
-#define FW_VERSION "9.11.0" // also bump data/version.json ("fs")
+#define FW_VERSION "9.12.0" // also bump data/version.json ("fs")
 
 // Fork versioning: upstream (Forbes-Automotive) numbers releases X.00.Y - the
 // middle field is always 00. This fork uses the middle field instead (9.10.0,
@@ -260,4 +260,28 @@ V9.11.0 - OTA tab: "Release source" switch between this fork and the official
         > add 'ota' to match existing layout
         > add reduction in throttle/speed off
         > move CAN into interrupt based - ESP_INTR_FLAG_IRAM
+
+V9.12.0 - upstream fixes synced from Forbes-Automotive main (up to 4215b76,
+          upstream 9.00.6), all by Kile Thomson, cherry-picked onto this
+          fork's flash layout:
+        - #51 a stopped CAN controller is now restarted whatever stopped it,
+          and with CAN sleep enabled a no-light-sleep lock is held while awake.
+          Automatic light sleep could power down the TWAI domain with the car
+          running, leaving a controller stopped: no frames to the Haldex.
+          Strong candidate for the Gen5 0AY "FWD in every mode" reports - on
+          Luca's S1 (CAN sleep + aggressive on) the Haldex bus was seen to go
+          silent while the chassis bus kept running.
+        - #45 Stock no longer feeds the reported engagement back as the lock
+          command (latched high lock until FWD / power cycle). Stock now
+          commands zero forced lock and forwards frames untouched.
+        - #46 when a bus goes silent, zero the inputs it latched (speed,
+          pedal, ESP/hazard force flags, ABS valid, reported engagement).
+        - #47 default VAG correction factor matches its comment.
+        - Line endings normalised to LF across the tree, as upstream #49.
+        NOT taken: upstream #44 Bluetooth LE / DashCAN and the new partition
+        table it needs (app slots 0x1C0000, LittleFS 0x70000). A partition
+        table cannot change over OTA, so taking it would force every unit -
+        including ones updated only from a phone - through a USB flash. This
+        fork stays on the 0x1A0000 / 0xB0000 layout so phone updates keep
+        working. Upstream already carries #39-#43 from this fork.
 */
