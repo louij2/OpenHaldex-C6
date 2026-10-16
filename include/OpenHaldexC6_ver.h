@@ -2,7 +2,7 @@
 #include <OpenHaldexC6_defs.h>
 
 // Current firmware version
-#define FW_VERSION "9.10.1" // also bump data/version.json ("fs")
+#define FW_VERSION "9.11.0" // also bump data/version.json ("fs")
 
 // Fork versioning: upstream (Forbes-Automotive) numbers releases X.00.Y - the
 // middle field is always 00. This fork uses the middle field instead (9.10.0,
@@ -227,6 +227,28 @@ V9.10.1 - removed the dead "Generation 3 - Volvo" option from the Haldex
           push-button OTA, since they predate the current OTA page and pushing
           one over the air would strand the unit's updater. Use Update from
           Files for those. The set offered to devices is unchanged.
+
+V9.11.0 - OTA tab: "Release source" switch between this fork and the official
+          Forbes Automotive releases. On the Forbes source every stable
+          official release is offered as a switch back (not hidden as a
+          rollback), the install button and confirmation say so plainly, and
+          the fork-only "Latest build" channel and rebuild check are hidden.
+          Installing one returns the unit to the official firmware, whose own
+          updater follows Forbes from then on; the hint and confirmation name
+          the fork's website as the way back. Kept in this browser only.
+        - Phone install guide published at louij2.github.io/OpenHaldex-C6
+          (site/, deployed by .github/workflows/pages.yml): iPhone-only steps
+          in English and Italian, download buttons that always point at the
+          latest release, and official Forbes files for going back.
+        - The guide deliberately uploads FIRMWARE FIRST when coming from
+          upstream 9.00.0. Seven different 9.00.0 binaries were published; the
+          five before 16:04 on 2026-09-20 still answer "200 OK" after the first
+          upload chunk (the bug 9.00.0's own changelog calls the root cause of
+          OTA never completing) and write the filesystem while it is mounted,
+          with no recovery page. On those, a cut-short firmware upload is
+          refused by esp_ota_end and the unit keeps its old firmware, whereas
+          a cut-short filesystem upload can boot-loop it. Firmware first means
+          the filesystem then goes through this fork's fixed uploader.
 
 */
 

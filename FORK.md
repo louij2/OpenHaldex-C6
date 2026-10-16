@@ -23,6 +23,11 @@ done its job.
   describes them come out of one run.
 - The four carried-over PRs: CLI legacy backup key, favicon + PWA branding,
   vehicle geometry settings, and the OTA "Latest build" channel.
+- **Phone install guide:** <https://louij2.github.io/OpenHaldex-C6/> (source in
+  `site/`). iPhone-only, English and Italian. It installs this fork over OTA
+  with no computer, and links the official files for going back.
+- **Switching back to Forbes** from a running fork: OTA tab → *Release source* →
+  *Forbes Automotive (official)* → *Check for updates* → *Switch to official*.
 
 ## Release process
 

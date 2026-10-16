@@ -16,6 +16,8 @@
 > carries fixes that are open upstream, builds its releases in CI, and points
 > the OTA updater at its own releases. See **[FORK.md](FORK.md)** for what
 > differs, the release process, and how to switch back to upstream builds.
+>
+> 📱 **Install from an iPhone, no computer:** <https://louij2.github.io/OpenHaldex-C6/>
 
 <p align="center">
 

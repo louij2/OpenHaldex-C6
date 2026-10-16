@@ -1039,6 +1039,14 @@
                     phone on the same network and open the address that card shows. On the OpenHaldex‑C6 access point
                     alone most phones drop mobile data. Keep this page open until the device has rebooted.</p>
                 <div class="input-group">
+                    <label for="updSource">Release source</label>
+                    <select id="updSource" class="input-select">
+                        <option value="fork">louij2 fork (this firmware)</option>
+                        <option value="forbes">Forbes Automotive (official)</option>
+                    </select>
+                </div>
+                <p class="hint" id="updSourceHint" hidden></p>
+                <div class="input-group" id="updChannelGroup">
                     <label for="updChannel">Update channel</label>
                     <select id="updChannel" class="input-select">
                         <option value="stable">Stable - published releases</option>
