@@ -2,7 +2,7 @@
 #include <OpenHaldexC6_defs.h>
 
 // Current firmware version
-#define FW_VERSION "9.12.0" // also bump data/version.json ("fs")
+#define FW_VERSION "9.12.1" // also bump data/version.json ("fs")
 
 // Fork versioning: upstream (Forbes-Automotive) numbers releases X.00.Y - the
 // middle field is always 00. This fork uses the middle field instead (9.10.0,
@@ -284,4 +284,12 @@ V9.12.0 - upstream fixes synced from Forbes-Automotive main (up to 4215b76,
         including ones updated only from a phone - through a USB flash. This
         fork stays on the 0x1A0000 / 0xB0000 layout so phone updates keep
         working. Upstream already carries #39-#43 from this fork.
+
+V9.12.1 - OTA: releases that don't fit this unit's partitions are no longer
+          offered. "Switch to official" previously offered Forbes 9.00.6,
+          which needs the 9.00.5+ Bluetooth layout (0x1C0000 app slots): on
+          this fork's 0x1A0000 / 0xB0000 layout the web UI step would succeed
+          and the firmware step then fail, leaving a mismatched unit. It now
+          offers the newest official release that fits (currently 9.00.0) and
+          says newer ones need a USB flash. Same check offered upstream.
 */

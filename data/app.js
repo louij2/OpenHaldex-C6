@@ -1957,6 +1957,16 @@ function updMirrors() {
   ];
 }
 function updDirApi() { return "https://api.github.com/repos/" + updRepo() + "/contents/Releases?ref=" + UPD_BRANCH; }
+// This build's partition sizes (src/partitions_4mb.csv - this fork keeps the
+// pre-Bluetooth layout). A partition table can't change over the air, so a
+// release whose images don't fit is not offered: upstream 9.00.5+ needs
+// 0x1C0000 app slots and would fail here after its web UI had been written.
+const UPD_APP_SLOT_BYTES = 0x1A0000;
+const UPD_FS_PART_BYTES = 0xB0000;
+function updFitsThisLayout(r) {
+  const fw = r && r.firmware && r.firmware.size, fs = r && r.filesystem && r.filesystem.size;
+  return !(fw > UPD_APP_SLOT_BYTES) && !(fs > UPD_FS_PART_BYTES);
+}
 // Update channel. Everything is published on one branch - main is the live
 // development branch and Releases/ holds the stable-ish cut - so the channel
 // changes which builds are *offered*, not where they are fetched from.
@@ -2028,7 +2038,14 @@ function initUpdateCheck() {
 
   function otaCandidates() {
     if (!index || !Array.isArray(index.releases)) return [];
-    return index.releases.filter((r) => r && r.ota && r.firmware && r.filesystem);
+    return index.releases.filter((r) => r && r.ota && r.firmware && r.filesystem && updFitsThisLayout(r));
+  }
+
+  // Switching back to Forbes: the newest stable official release that fits
+  // this unit's partitions (Forbes' "latest" may need a USB flash).
+  function officialTarget() {
+    const c = otaCandidates().filter((r) => r.channel !== "beta").sort((a, b) => updCompareVersions(b.version, a.version));
+    return c.length ? c[0].version : "";
   }
 
   function renderPicker() {
@@ -2036,8 +2053,11 @@ function initUpdateCheck() {
     const all = showAll && showAll.checked;
     // From the Forbes source every stable release is a switch back to the
     // official firmware, so the "newer than installed" rule does not apply.
+    // Switching back to Forbes, the newest compatible official release is the
+    // target; older ones stay behind "Show beta / older versions".
+    const target = updIsForbes() ? officialTarget() : "";
     const list = otaCandidates().filter((r) => all || (r.channel !== "beta" &&
-      (updIsForbes() || updCompareVersions(r.version, cur) >= 0)));
+      (updIsForbes() ? r.version === target : updCompareVersions(r.version, cur) >= 0)));
     // Nothing extra to add on "latest": the >= 0 compare above already keeps
     // the installed version in the list, which is what makes a rebuild of it
     // installable. The channel only changes the wording and the rebuild check.
@@ -2241,9 +2261,18 @@ function initUpdateCheck() {
       : !fr.dirs ? " (folder listing unavailable - " + (fr.reached || fr.netErr || "no answer") + "; showing the index only)" : "";
     const via = " Release list from " + (updIsForbes() ? "Forbes Automotive via " : "") + updMirrors().filter((m) => m.base === UPD_RELEASES_BASE).map((m) => m.name).join("") + " in " + secs() + ".";
     if (updIsForbes()) {
-      setState("Official release available", "upd-available");
-      setStatus("Official Forbes Automotive v" + latest + " is available. Installing it switches this controller back to the " +
-        "official firmware (installed: v" + cur + ")." + srcNote + via);
+      const target = officialTarget();
+      set("updLatest", target ? "v" + target : "--");
+      if (!target) {
+        setState("Needs a USB flash", "upd-bad");
+        setStatus("No official release fits this unit's partition layout, so switching back can't be done over the air. " +
+          "Use the official web installer from a computer." + srcNote + via, "error");
+      } else {
+        setState("Official release available", "upd-available");
+        setStatus("Official Forbes Automotive v" + target + " fits this unit. Installing it switches this controller back to the " +
+          "official firmware (installed: v" + cur + ")." + (target !== latest ? " Newer official releases need a USB flash." : "") +
+          srcNote + via);
+      }
       renderPicker();
       finish();
       return;
