@@ -7,9 +7,9 @@ name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "ci/upstream-prs" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "ci/upstream-prs" ]
 
 permissions:
   contents: read
