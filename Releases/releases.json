@@ -1,7 +1,24 @@
 {
   "product": "OpenHaldex-C6",
-  "latest": "9.12.0",
+  "latest": "9.12.1",
   "releases": [
+    {
+      "version": "9.12.1",
+      "channel": "stable",
+      "date": "2026-10-21",
+      "ota": true,
+      "notes": "OTA: releases that don't fit this unit's partitions are no longer offered. \"Switch to official\" previously offered Forbes 9.00.6, which needs the 9.00.5+ Bluetooth layout (0x1C0000 app slots): on this fork's 0x1A0000 / 0xB0000 layout the web UI step would succeed and the firmware step then fail, leaving a mismatched unit. It now offers the newest official release that fits (currently 9.00.0) and says newer ones need a USB flash. Same check offered upstream",
+      "firmware": {
+        "path": "V9.12.1/firmware.bin",
+        "size": 1322816,
+        "sha256": "84af43e916a5ab5a4b0020ccd085d8dd16936f539be9d553597f415b9c914bd7"
+      },
+      "filesystem": {
+        "path": "V9.12.1/littlefs.bin",
+        "size": 720896,
+        "sha256": "c916ea8aa817698f4097c3d5085a4edb4fdf077cbc89015e1c90b8302f43ff74"
+      }
+    },
     {
       "version": "9.12.0",
       "channel": "stable",
