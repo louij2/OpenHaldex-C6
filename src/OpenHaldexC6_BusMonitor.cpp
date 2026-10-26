@@ -1,4 +1,6 @@
 #include <OpenHaldexC6_BusMonitor.h>
+#include <OpenHaldexC6_OTA.h> // fsMounted(), isOTAUpdateInProgress()
+#include "esp_system.h"       // esp_reset_reason()
 
 // Passive bus monitor (see the header). One fixed table, keyed by
 // (bus, extended flag, identifier), filled from the two CAN RX tasks.
@@ -37,6 +39,12 @@ static uint32_t droppedFrames = 0; // frames of new IDs refused because the tabl
 static uint32_t busTotals[2] = {0, 0};
 static uint32_t resetMs = 0;
 static bool initialised = false;
+
+// Sleep-logger hooks, written by the RX tasks: when each side last carried a
+// frame, whether it had been declared quiet, and the frame that woke it.
+static volatile uint32_t lastBusMs[2] = {0, 0};
+static volatile bool busQuiet[2] = {false, false};
+static volatile uint32_t wakeKey[2] = {kUnused, kUnused};
 
 static uint32_t baseline[kMaxBaseline]; // sorted keys
 static uint16_t baselineCount = 0;
@@ -88,6 +96,8 @@ static void printKey(Print &out, uint32_t key) {
 
 }  // namespace
 
+static void busLogSetup();
+
 void busMonitorSetup() {
   taskENTER_CRITICAL(&mux);
   clearTableLocked();
@@ -101,6 +111,7 @@ void busMonitorSetup() {
     qsort(baseline, baselineCount, sizeof(uint32_t), cmpKey);
   }
   busmonPref.end();
+  busLogSetup();
   initialised = true;
 }
 
@@ -112,6 +123,11 @@ void busMonitorFrame(const twai_message_t &m, uint8_t bus) {
 
   taskENTER_CRITICAL(&mux);
   busTotals[bus & 1]++;
+  lastBusMs[bus & 1] = now;
+  if (busQuiet[bus & 1]) {
+    busQuiet[bus & 1] = false;
+    wakeKey[bus & 1] = key; // the frame that broke the silence
+  }
   uint16_t slot = hashKey(key);
   while (table[slot].key != kUnused && table[slot].key != key) {
     slot = (slot + 1) & (kSlots - 1);
@@ -242,4 +258,249 @@ void busMonitorWriteJson(Print &out) {
     out.print("}");
   }
   out.print("]}");
+}
+
+// ---------------------------------------------------------------------------
+// Sleep logger
+// ---------------------------------------------------------------------------
+
+const char *const BUSLOG_PATH = "/buslog.txt";
+const char *const BUSLOG_OLD_PATH = "/buslog.old.txt";
+
+namespace {
+
+static const uint32_t kSampleS = 120;       // one sample every 2 minutes
+static const uint16_t kSamples = 1440;      // = 48 h
+static const uint32_t kQuietMs = 10000;     // a side with no frame for 10 s is "quiet"
+static const size_t kLogMaxBytes = 8192;    // rotate the event file past this
+static const uint8_t kEventIds = 6;
+
+struct BusSample {
+  uint16_t fps[2];   // average frames/s over the sample, car / haldex
+  uint8_t ids[2];    // IDs heard during the sample, per side (saturating)
+  uint8_t flags;     // bit0 = controller in low-power sleep at sample time
+  uint8_t pad;
+};
+
+static BusSample samples[kSamples];
+static uint32_t sampleSeq = 0;              // samples taken this boot; sample n ends at uptime (n+1)*kSampleS
+static uint32_t sampleBase = 0;             // first sequence still held after a clear
+static uint32_t lastSampleMs = 0;
+static uint32_t lastTotals[2] = {0, 0};
+static bool tickStarted = false;
+static bool lastLowPower = false;
+static uint32_t quietFromMs[2] = {0, 0}; // last frame before each side went quiet
+static uint32_t bootCount = 0;
+
+enum BusEventType : uint8_t { EV_BOOT, EV_QUIET, EV_ACTIVE, EV_LP_SLEEP, EV_LP_WAKE };
+
+struct BusEvent {
+  uint8_t type;
+  uint8_t bus;
+  uint8_t nkeys;
+  uint32_t uptimeS;
+  uint32_t value;
+  uint32_t keys[kEventIds];
+};
+
+static QueueHandle_t eventQueue = nullptr;
+
+static void queueEvent(BusEvent &ev) {
+  ev.uptimeS = millis() / 1000;
+  if (eventQueue) xQueueSend(eventQueue, &ev, 0); // drop rather than block the IO task
+}
+
+// The most recently heard IDs on one side, newest first.
+static uint8_t lastHeard(uint8_t bus, uint32_t *keys, uint8_t max) {
+  uint32_t when[kEventIds];
+  uint8_t n = 0;
+  for (uint16_t i = 0; i < kSlots; i++) {
+    taskENTER_CRITICAL(&mux);
+    const uint32_t k = table[i].key, t = table[i].lastMs;
+    taskEXIT_CRITICAL(&mux);
+    if (k == kUnused || ((k >> 30) & 1) != bus) continue;
+    uint8_t pos = n;
+    while (pos > 0 && (int32_t)(t - when[pos - 1]) > 0) pos--;
+    if (pos >= max) continue;
+    if (n < max) n++;
+    for (uint8_t j = n - 1; j > pos; j--) {
+      keys[j] = keys[j - 1];
+      when[j] = when[j - 1];
+    }
+    keys[pos] = k;
+    when[pos] = t;
+  }
+  return n;
+}
+
+static const char *resetReasonName(uint32_t r) {
+  switch ((esp_reset_reason_t)r) {
+    case ESP_RST_POWERON: return "power-on";
+    case ESP_RST_SW: return "software";
+    case ESP_RST_PANIC: return "panic";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT: return "watchdog";
+    case ESP_RST_BROWNOUT: return "brownout";
+    case ESP_RST_DEEPSLEEP: return "deep-sleep";
+    default: return "other";
+  }
+}
+
+static void writeEvent(const BusEvent &ev) {
+  if (!fsMounted() || isOTAUpdateInProgress()) return;
+  static const char *const side[2] = {"car", "haldex"};
+  char line[160];
+  int len = snprintf(line, sizeof(line), "b%lu t%lu ", (unsigned long)bootCount, (unsigned long)ev.uptimeS);
+  switch (ev.type) {
+    case EV_BOOT: len += snprintf(line + len, sizeof(line) - len, "boot reset=%s", resetReasonName(ev.value)); break;
+    case EV_QUIET: len += snprintf(line + len, sizeof(line) - len, "quiet %s last=", side[ev.bus]); break;
+    case EV_ACTIVE: len += snprintf(line + len, sizeof(line) - len, "active %s after=%lus first=", side[ev.bus], (unsigned long)ev.value); break;
+    case EV_LP_SLEEP: len += snprintf(line + len, sizeof(line) - len, "lp-sleep"); break;
+    case EV_LP_WAKE: len += snprintf(line + len, sizeof(line) - len, "lp-wake"); break;
+  }
+  for (uint8_t i = 0; i < ev.nkeys && len < (int)sizeof(line) - 12; i++) {
+    const uint32_t k = ev.keys[i];
+    len += snprintf(line + len, sizeof(line) - len, "%s0x%0*lX", i ? "," : "", ((k >> 29) & 1) ? 8 : 3,
+                    (unsigned long)(k & 0x1FFFFFFFUL));
+  }
+
+  File f = LittleFS.open(BUSLOG_PATH, "a");
+  if (!f) return;
+  const size_t size = f.size();
+  f.println(line);
+  f.close();
+  if (size > kLogMaxBytes) {
+    LittleFS.remove(BUSLOG_OLD_PATH);
+    LittleFS.rename(BUSLOG_PATH, BUSLOG_OLD_PATH);
+  }
+}
+
+// Blocks on the queue, so it costs nothing (and never wakes the CPU) between events.
+static void busLogTask(void *) {
+  // The boot event is queued before the web server mounts LittleFS; give it a moment.
+  for (uint8_t i = 0; i < 60 && !fsMounted(); i++) vTaskDelay(pdMS_TO_TICKS(500));
+  BusEvent ev;
+  while (1) {
+    if (xQueueReceive(eventQueue, &ev, portMAX_DELAY) == pdTRUE) writeEvent(ev);
+  }
+}
+
+static void takeSample(uint32_t now) {
+  uint32_t totals[2];
+  uint16_t ids[2] = {0, 0};
+  taskENTER_CRITICAL(&mux);
+  totals[0] = busTotals[0];
+  totals[1] = busTotals[1];
+  taskEXIT_CRITICAL(&mux);
+  for (uint16_t i = 0; i < kSlots; i++) {
+    taskENTER_CRITICAL(&mux);
+    const uint32_t k = table[i].key, t = table[i].lastMs;
+    taskEXIT_CRITICAL(&mux);
+    if (k != kUnused && (int32_t)(t - lastSampleMs) >= 0) ids[(k >> 30) & 1]++;
+  }
+  BusSample &s = samples[sampleSeq % kSamples];
+  for (uint8_t b = 0; b < 2; b++) {
+    // A table reset zeroes the totals; count from zero then.
+    const uint32_t delta = totals[b] >= lastTotals[b] ? totals[b] - lastTotals[b] : totals[b];
+    const uint32_t fps = delta / kSampleS;
+    s.fps[b] = fps > 0xFFFF ? 0xFFFF : fps;
+    s.ids[b] = ids[b] > 0xFF ? 0xFF : ids[b];
+    lastTotals[b] = totals[b];
+  }
+  s.flags = lowPowerMode ? 1 : 0;
+  sampleSeq++;
+  lastSampleMs = now;
+}
+
+}  // namespace
+
+// Called from busMonitorSetup() (setup()'s stack, not the 2 KB IO task's).
+static void busLogSetup() {
+  busmonPref.begin("busmon", false);
+  bootCount = busmonPref.getUInt("boots", 0) + 1;
+  busmonPref.putUInt("boots", bootCount);
+  busmonPref.end();
+  eventQueue = xQueueCreate(8, sizeof(BusEvent));
+  if (eventQueue) xTaskCreate(busLogTask, "busLog", 4096, NULL, 1, NULL);
+  BusEvent ev = {};
+  ev.type = EV_BOOT;
+  ev.value = (uint32_t)esp_reset_reason();
+  queueEvent(ev);
+}
+
+void busLogTick() {
+  if (!initialised) return;
+  const uint32_t now = millis();
+
+  if (!tickStarted) {
+    tickStarted = true;
+    lastLowPower = lowPowerMode;
+  }
+
+  for (uint8_t b = 0; b < 2; b++) {
+    // Declare quiet under the lock, so a frame can't land between the check and the flag.
+    bool wentQuiet = false;
+    taskENTER_CRITICAL(&mux);
+    const uint32_t last = lastBusMs[b];
+    if (!busQuiet[b] && last != 0 && (now - last) >= kQuietMs) {
+      busQuiet[b] = true;
+      quietFromMs[b] = last;
+      wentQuiet = true;
+    }
+    const uint32_t wk = wakeKey[b];
+    wakeKey[b] = kUnused;
+    const uint32_t wokeMs = lastBusMs[b];
+    taskEXIT_CRITICAL(&mux);
+
+    if (wentQuiet) {
+      BusEvent ev = {};
+      ev.type = EV_QUIET;
+      ev.bus = b;
+      ev.nkeys = lastHeard(b, ev.keys, kEventIds);
+      queueEvent(ev);
+    }
+    if (wk != kUnused) {
+      BusEvent ev = {};
+      ev.type = EV_ACTIVE;
+      ev.bus = b;
+      ev.nkeys = 1;
+      ev.keys[0] = wk;
+      ev.value = (wokeMs - quietFromMs[b]) / 1000; // how long it had been silent
+      queueEvent(ev);
+    }
+  }
+
+  if (lowPowerMode != lastLowPower) {
+    lastLowPower = lowPowerMode;
+    BusEvent ev = {};
+    ev.type = lowPowerMode ? EV_LP_SLEEP : EV_LP_WAKE;
+    queueEvent(ev);
+  }
+
+  if ((now - lastSampleMs) >= kSampleS * 1000UL) takeSample(now);
+}
+
+void busLogClear() {
+  sampleBase = sampleSeq;
+  if (fsMounted()) {
+    LittleFS.remove(BUSLOG_PATH);
+    LittleFS.remove(BUSLOG_OLD_PATH);
+  }
+}
+
+// samples: oldest first, [car fps, haldex fps, car IDs, haldex IDs, low-power],
+// the last one ending at endUptimeS and each covering intervalS.
+void busLogWriteJson(Print &out) {
+  const uint32_t seq = sampleSeq;
+  uint32_t first = seq > kSamples ? seq - kSamples : 0;
+  if (first < sampleBase) first = sampleBase;
+  out.printf("{\"boot\":%lu,\"uptimeS\":%lu,\"intervalS\":%lu,\"endUptimeS\":%lu,\"samples\":[",
+             (unsigned long)bootCount, (unsigned long)(millis() / 1000), (unsigned long)kSampleS,
+             (unsigned long)(lastSampleMs / 1000));
+  for (uint32_t n = first; n < seq; n++) {
+    const BusSample &s = samples[n % kSamples];
+    out.printf("%s[%u,%u,%u,%u,%u]", n == first ? "" : ",", s.fps[0], s.fps[1], s.ids[0], s.ids[1], s.flags & 1);
+  }
+  out.printf("],\"quiet\":[%s,%s]}", busQuiet[0] ? "true" : "false", busQuiet[1] ? "true" : "false");
 }

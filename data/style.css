@@ -984,3 +984,4 @@ input[type="file"]::file-selector-button:hover { background: rgba(36, 209, 196, 
 .busmon-table td:last-child { font-family: ui-monospace, monospace; }
 .busmon-table tr.busmon-new td { color: var(--warning, #f5a623); font-weight: 600; }
 .busmon-table tr.busmon-quiet td { opacity: 0.45; }
+.buslog-events { font-size: 11px; max-height: 260px; overflow: auto; white-space: pre-wrap; }

@@ -14,6 +14,8 @@ the car) awake.
   python3 tools/busmon.py --host 10.0.0.73 reset               # start counting afresh
   python3 tools/busmon.py --host 10.0.0.73 baseline            # save current IDs on the device
   python3 tools/busmon.py --host 10.0.0.73 baseline --clear
+  python3 tools/busmon.py --host 10.0.0.73 log                 # sleep logger, wall-clock times
+  python3 tools/busmon.py --host 10.0.0.73 log --csv s.csv     # also write the 2-min samples
 
 `show` marks IDs that neither the DBC nor the firmware's own ID list names as
 UNKNOWN, and (once a baseline is saved on the device) IDs outside it as NEW.
@@ -94,6 +96,38 @@ def cmd_baseline(a):
     print(call(a.host, "/api/busmon/baseline", "DELETE" if a.clear else "POST"))
 
 
+def cmd_log(a):
+    """Sleep logger. Device times are uptime seconds per boot; lines from the
+    current boot get a wall-clock time, older boots keep their uptime."""
+    now = time.time()
+    d = call(a.host, "/api/buslog")
+    req = urllib.request.Request(f"http://{a.host}/api/buslog/events")
+    with urllib.request.urlopen(req, timeout=10) as r:
+        events = r.read().decode(errors="replace").splitlines()
+    boot0 = now - d["uptimeS"]
+    wall = lambda up: time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(boot0 + up))  # noqa: E731
+    print(f"boot #{d['boot']}, up {ago(d['uptimeS'] * 1000)}; quiet now: car={d['quiet'][0]} haldex={d['quiet'][1]}")
+    for line in events:
+        parts = line.split(" ", 2)
+        if len(parts) == 3 and parts[0] == f"b{d['boot']}" and parts[1].startswith("t"):
+            print(f"  {wall(int(parts[1][1:]))}  {parts[2]}")
+        else:
+            print(f"  (earlier boot) {line}")
+    rows = d["samples"]
+    if rows:
+        start = d["endUptimeS"] - d["intervalS"] * len(rows)
+        if a.csv:
+            with open(a.csv, "w") as f:
+                f.write("time,car_fps,haldex_fps,car_ids,haldex_ids,low_power\n")
+                for i, r in enumerate(rows):
+                    f.write(wall(start + d["intervalS"] * (i + 1)) + "," + ",".join(map(str, r)) + "\n")
+            print(f"{len(rows)} samples written to {a.csv}")
+        else:
+            print(f"last samples ({d['intervalS']} s each): time car_fps haldex_fps car_ids haldex_ids lp")
+            for i, r in list(enumerate(rows))[-a.tail:]:
+                print(f"  {wall(start + d['intervalS'] * (i + 1))}  " + "  ".join(f"{v:5d}" for v in r))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--host", default="openhaldex.local")
@@ -115,6 +149,10 @@ def main():
     b = sub.add_parser("baseline", help="save (or --clear) the device-side baseline")
     b.add_argument("--clear", action="store_true")
     b.set_defaults(func=cmd_baseline)
+    lg = sub.add_parser("log", help="sleep logger: events + 2-minute samples")
+    lg.add_argument("--csv", help="write all samples to this CSV")
+    lg.add_argument("--tail", type=int, default=15, help="samples to print (default 15)")
+    lg.set_defaults(func=cmd_log)
     a = p.parse_args()
     a.func(a)
 

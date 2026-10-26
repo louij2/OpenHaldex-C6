@@ -299,4 +299,11 @@ V9.13.0 - Diagnostics: "Bus Monitor" card and GET /api/busmon. A passive
           outside it show as NEW, baseline IDs gone quiet as missing.
           Receive-only, works in every mode, and polling it never keeps the
           controller awake. tools/busmon.py reads, saves and diffs it.
+        - Sleep log (same card, GET /api/buslog): 2-minute samples of
+          frames/s and active IDs per side for 48 h, plus an event file on
+          LittleFS: boot (with reset reason), each side going quiet (and the
+          IDs heard last), the ID that woke it and how long it slept, and
+          low-power sleep/wake. Answers "did the bus really sleep, and what
+          woke it" without anyone watching. `busmon.py log` prints it with
+          wall-clock times.
 */
