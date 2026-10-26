@@ -2,7 +2,7 @@
 #include <OpenHaldexC6_defs.h>
 
 // Current firmware version
-#define FW_VERSION "9.12.1" // also bump data/version.json ("fs")
+#define FW_VERSION "9.13.0" // also bump data/version.json ("fs")
 
 // Fork versioning: upstream (Forbes-Automotive) numbers releases X.00.Y - the
 // middle field is always 00. This fork uses the middle field instead (9.10.0,
@@ -292,4 +292,11 @@ V9.12.1 - OTA: releases that don't fit this unit's partitions are no longer
           and the firmware step then fail, leaving a mismatched unit. It now
           offers the newest official release that fits (currently 9.00.0) and
           says newer ones need a USB flash. Same check offered upstream.
+V9.13.0 - Diagnostics: "Bus Monitor" card and GET /api/busmon. A passive
+          census of every CAN ID received on each side of the controller
+          (car / Haldex): count, rate, first/last seen, payload changes and
+          last payload. Save a baseline (kept in NVS, survives OTA) and IDs
+          outside it show as NEW, baseline IDs gone quiet as missing.
+          Receive-only, works in every mode, and polling it never keeps the
+          controller awake. tools/busmon.py reads, saves and diffs it.
 */

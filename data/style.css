@@ -975,3 +975,12 @@ input[type="file"]::file-selector-button:hover { background: rgba(36, 209, 196, 
 .tile-opt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
 .tile-opt { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); cursor: pointer; }
 .tile-opt input { accent-color: var(--accent); }
+
+/* --- Bus monitor ---------------------------------------------------------- */
+.busmon-wrap { overflow-x: auto; margin: 8px 0; }
+.busmon-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.busmon-table th, .busmon-table td { padding: 3px 6px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border, #333); }
+.busmon-table th:nth-child(-n+2), .busmon-table td:nth-child(-n+2), .busmon-table td:last-child { text-align: left; }
+.busmon-table td:last-child { font-family: ui-monospace, monospace; }
+.busmon-table tr.busmon-new td { color: var(--warning, #f5a623); font-weight: 600; }
+.busmon-table tr.busmon-quiet td { opacity: 0.45; }

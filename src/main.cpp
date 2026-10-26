@@ -12,6 +12,7 @@ Version: 8.00.5
 #include <OpenHaldexC6_WiFi.h>
 #include <OpenHaldexC6_Analyzer.h>
 #include <OpenHaldexC6_API.h>
+#include <OpenHaldexC6_BusMonitor.h>
 #include <ESPmDNS.h> // for mDNS responder to allow openhaldex.local access to the web UI without needing to know the IP address
 #include "esp_pm.h"  // for power management when CAN sleep enabled
 
@@ -31,6 +32,7 @@ void setup()
 #endif
 
   readEEP();        // read previously stored settings in EEPROM
+  busMonitorSetup(); // passive bus monitor: load saved baseline before CAN starts
   setupIO();        // setup IO
   setupCAN();       // bring CAN online
   setupButtons();   // setup mode & external mode buttons

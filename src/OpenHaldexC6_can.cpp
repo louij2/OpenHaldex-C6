@@ -2,6 +2,7 @@
 #include <OpenHaldexC6_Calculations.h>
 #include <OpenHaldexC6_Analyzer.h>
 #include <OpenHaldexC6_UDS.h>
+#include <OpenHaldexC6_BusMonitor.h>
 
 // Every bridge / diagnostic transmit goes through this wrapper so a failed send
 // (TX queue still full after the 10 ms wait, driver stopped / bus-off) is
@@ -316,6 +317,7 @@ void parseCAN_chs(void *arg)
     {
       lastCANChassisTick = millis();
       ++lpChassisFrameCount;
+      busMonitorFrame(rx_message_chs, 0); // passive per-ID census, every mode
 
       // External diagnostic-tool detection (auto-pause of live polling).
       // A scanner addresses the Haldex from the chassis side; these request IDs
@@ -971,6 +973,7 @@ void parseCAN_hdx(void *arg)
       lastCANHaldexTick = millis();
       ++lpHaldexFrameCount;
       hdxRxCensus(rx_message_hdx);
+      busMonitorFrame(rx_message_hdx, 1);
 
       // Analyzer mode: queue for GVRET/SLCAN and forward untouched, skipping control logic.
       if (analyzerMode || analyzerSerial)
