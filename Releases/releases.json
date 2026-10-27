@@ -1,7 +1,24 @@
 {
   "product": "OpenHaldex-C6",
-  "latest": "9.12.1",
+  "latest": "9.13.0",
   "releases": [
+    {
+      "version": "9.13.0",
+      "channel": "stable",
+      "date": "2026-10-27",
+      "ota": true,
+      "notes": "Diagnostics: \"Bus Monitor\" card and GET /api/busmon. A passive census of every CAN ID received on each side of the controller (car / Haldex): count, rate, first/last seen, payload changes and last payload. Save a baseline (kept in NVS, survives OTA) and IDs outside it show as NEW, baseline IDs gone quiet as missing. Receive-only, works in every mode, and polling it never keeps the controller awake. tools/busmon.py reads, saves and diffs it; Sleep log (same card, GET /api/buslog): 2-minute samples of frames/s and active IDs per side for 48 h, plus an event file on LittleFS: boot (with reset reason), each side going quiet (and the IDs heard last), the ID that woke it and how long it slept, and low-power sleep/wake. Answers \"did the bus really sleep, and what woke it\" without anyone watching. `busmon.py log` prints it with wall-clock times",
+      "firmware": {
+        "path": "V9.13.0/firmware.bin",
+        "size": 1335808,
+        "sha256": "8a220ee7c6aa3abdb098ce09b35c3f246a98c1bdf7fa29fa2b3dc4799d9a291d"
+      },
+      "filesystem": {
+        "path": "V9.13.0/littlefs.bin",
+        "size": 720896,
+        "sha256": "04b24467a4858040b488f6a5588494ca606a74039b0613907226dd26becc34ff"
+      }
+    },
     {
       "version": "9.12.1",
       "channel": "stable",
