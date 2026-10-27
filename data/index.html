@@ -916,6 +916,12 @@
                 <p class="hint" id="busMonSummary">--</p>
                 <div class="busmon-wrap"><table class="busmon-table" id="busMonTable"></table></div>
                 <p class="hint" id="busMonMissing"></p>
+                <details id="busLogDetails">
+                    <summary>Sleep log</summary>
+                    <p class="hint">When each side went quiet (and which IDs talked last), what woke it, and
+                        low-power sleep/wake. Times are since this boot. 2-minute samples: <code>GET /api/buslog</code>.</p>
+                    <pre class="buslog-events" id="busLogEvents">--</pre>
+                </details>
                 <div class="wifi-controls">
                     <button class="btn-secondary" id="busMonReset">Reset</button>
                     <button class="btn-secondary" id="busMonBaseline">Save as Baseline</button>

@@ -3769,4 +3769,29 @@ function initBusMonitor() {
   });
   document.getElementById("busMonBaselineClear").addEventListener("click", () => post("/api/busmon/baseline", "DELETE"));
   setInterval(poll, 2000);
+
+  // Sleep log: fetched when opened. "b<boot> t<seconds> ..." -> "+1h02m ...".
+  const logDetails = document.getElementById("busLogDetails");
+  const logPre = document.getElementById("busLogEvents");
+  if (logDetails && logPre) {
+    logDetails.addEventListener("toggle", async () => {
+      if (!logDetails.open) return;
+      try {
+        const [meta, text] = await Promise.all([
+          fetchJson("/api/buslog", { cache: "no-store" }),
+          fetch("/api/buslog/events", { cache: "no-store" }).then((r) => r.text()),
+        ]);
+        const here = meta ? "b" + meta.boot : "";
+        logPre.textContent = text.trim().split("\n").filter(Boolean).map((line) => {
+          const m = line.match(/^(b\d+) t(\d+) (.*)$/);
+          if (!m) return line;
+          const s = +m[2];
+          const t = "+" + Math.floor(s / 3600) + "h" + String(Math.floor((s % 3600) / 60)).padStart(2, "0") + "m";
+          return (m[1] === here ? t : m[1] + " " + t) + "  " + m[3];
+        }).reverse().join("\n") || "No events yet.";
+      } catch (e) {
+        logPre.textContent = "Could not load the log.";
+      }
+    });
+  }
 }

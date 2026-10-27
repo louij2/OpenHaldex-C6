@@ -993,6 +993,41 @@ void setupAPI()
                      resp["ok"] = true;
                      sendJSON(request, 200, resp); });
 
+    // GET /api/buslog/events - the sleep logger's event lines (previous file, then current)
+    webServer.on("/api/buslog/events", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
+                     AsyncResponseStream *res = request->beginResponseStream("text/plain");
+                     res->addHeader("Cache-Control", "no-store");
+                     if (fsMounted())
+                     {
+                         for (const char *path : {BUSLOG_OLD_PATH, BUSLOG_PATH})
+                         {
+                             File f = LittleFS.open(path, "r");
+                             if (!f) continue;
+                             uint8_t buf[256];
+                             size_t n;
+                             while ((n = f.read(buf, sizeof(buf))) > 0) res->write(buf, n);
+                             f.close();
+                         }
+                     }
+                     request->send(res); });
+
+    // POST /api/buslog/clear - drop the samples and the event files
+    webServer.on("/api/buslog/clear", HTTP_POST, [](AsyncWebServerRequest *request)
+                 {
+                     busLogClear();
+                     JsonDocument resp;
+                     resp["ok"] = true;
+                     sendJSON(request, 200, resp); });
+
+    // GET /api/buslog - 2-minute samples for the last 48 h: [car fps, haldex fps, car IDs, haldex IDs, low-power]
+    webServer.on("/api/buslog", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
+                     AsyncResponseStream *res = request->beginResponseStream("application/json");
+                     res->addHeader("Cache-Control", "no-store");
+                     busLogWriteJson(*res);
+                     request->send(res); });
+
     // GET /api/busmon - per-ID list: side, count, rate, first/last seen, payload changes, new-vs-baseline
     webServer.on("/api/busmon", HTTP_GET, [](AsyncWebServerRequest *request)
                  {
