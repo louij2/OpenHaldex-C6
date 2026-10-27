@@ -906,6 +906,29 @@
                 </div>
             </section>
 
+            <section class="card" id="busMonCard">
+                <h2>Bus Monitor</h2>
+                <p class="hint">Every CAN ID the controller has received since the last reset, on each side:
+                    <strong>Car</strong> = chassis bus, <strong>Haldex</strong> = what the Haldex side sent.
+                    Read-only: nothing is transmitted or changed. Save a baseline when the car is in a known
+                    state; IDs outside it are then marked <strong>NEW</strong>, and baseline IDs that have gone
+                    quiet are listed underneath. Also at <code>GET /api/busmon</code>.</p>
+                <p class="hint" id="busMonSummary">--</p>
+                <div class="busmon-wrap"><table class="busmon-table" id="busMonTable"></table></div>
+                <p class="hint" id="busMonMissing"></p>
+                <details id="busLogDetails">
+                    <summary>Sleep log</summary>
+                    <p class="hint">When each side went quiet (and which IDs talked last), what woke it, and
+                        low-power sleep/wake. Times are since this boot. 2-minute samples: <code>GET /api/buslog</code>.</p>
+                    <pre class="buslog-events" id="busLogEvents">--</pre>
+                </details>
+                <div class="wifi-controls">
+                    <button class="btn-secondary" id="busMonReset">Reset</button>
+                    <button class="btn-secondary" id="busMonBaseline">Save as Baseline</button>
+                    <button class="btn-secondary" id="busMonBaselineClear">Clear Baseline</button>
+                </div>
+            </section>
+
             <section class="card">
                 <h2>Frame Editing (Advanced)</h2>
                 <p class="hint">Enable or disable editing of individual CAN frames in normal (non-standalone) mode. Unchecking a frame leaves the car's original frame untouched (clean passthrough). Use this to bisect which edited frame upsets the learn procedure. Changes apply immediately and are saved. Only affects the selected Haldex generation.</p>

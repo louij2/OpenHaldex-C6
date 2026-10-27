@@ -76,6 +76,7 @@ function initApp() {
   initOtaPage();
   initUpdateCheck();
   initCollapsibleCards();
+  initBusMonitor();
   initGaugeUI();
   drawTuneChart();
   startIntroSweep(); // last: everything above is drawn; sweeps once the window has loaded and the first poll is in
@@ -3705,4 +3706,92 @@ function initGaugeUI() {
   applyGaugePrefs();
   renderLockTrace(Date.now());
   updateEngagementGauge(null, null, true); // empty arc, drawn instantly - the intro sweep starts from here
+}
+
+// Bus monitor card (Diagnostics). Polls /api/busmon only while the card is open
+// on the visible page, and that endpoint doesn't count as UI activity, so an
+// open card never keeps the controller awake on its own.
+function initBusMonitor() {
+  const card = document.getElementById("busMonCard");
+  const table = document.getElementById("busMonTable");
+  const summary = document.getElementById("busMonSummary");
+  const missing = document.getElementById("busMonMissing");
+  if (!card || !table) return;
+
+  const SIDE = ["Car", "Haldex"];
+  let prev = null; // last poll, for bus frames/s
+
+  const ago = (ms) => (ms < 1000 ? ms + " ms" : ms < 60000 ? (ms / 1000).toFixed(1) + " s"
+    : ms < 3600000 ? Math.round(ms / 60000) + " min" : (ms / 3600000).toFixed(1) + " h");
+
+  function render(d) {
+    let fps = "";
+    if (prev && d.uptimeMs > prev.uptimeMs && d.sinceResetMs >= prev.sinceResetMs) {
+      const dt = (d.uptimeMs - prev.uptimeMs) / 1000;
+      fps = " · " + [0, 1].map((b) => SIDE[b] + " " + Math.round((d.frames[b] - prev.frames[b]) / dt) + " fps").join(", ");
+    }
+    prev = d;
+    const nNew = d.ids.filter((e) => e.new).length;
+    summary.textContent = d.idCount + " IDs in " + ago(d.sinceResetMs) + fps +
+      (d.baselineCount ? " · baseline " + d.baselineCount + " IDs, " + nNew + " new, " + d.missing.length + " missing" : " · no baseline saved") +
+      (d.droppedFrames ? " · table full, " + d.droppedFrames + " frames of further IDs not tracked" : "");
+
+    const rows = d.ids.slice().sort((a, b) => a.bus - b.bus || parseInt(a.id, 16) - parseInt(b.id, 16));
+    const head = "<tr><th>Side</th><th>ID</th><th>Hz</th><th>Count</th><th>Last</th><th>Changes</th><th>Data</th></tr>";
+    table.innerHTML = head + rows.map((e) => {
+      const quiet = e.lastAgoMs > 5000 && e.lastAgoMs > 3 * (e.periodMs || 0);
+      const cls = e.new ? "busmon-new" : quiet ? "busmon-quiet" : "";
+      return `<tr class="${cls}"><td>${SIDE[e.bus]}${e.new ? " NEW" : ""}</td><td>${e.id}</td>` +
+        `<td>${e.hz.toFixed(e.hz < 10 ? 2 : 0)}</td><td>${e.count}</td><td>${ago(e.lastAgoMs)}</td>` +
+        `<td>${e.changes}</td><td>${e.data}</td></tr>`;
+    }).join("");
+    missing.textContent = d.missing.length
+      ? "Baseline IDs not seen since reset: " + d.missing.map((m) => SIDE[m.bus] + " " + m.id).join(", ")
+      : "";
+  }
+
+  async function poll() {
+    const page = document.getElementById("diagnostics-page");
+    if (!page || !page.classList.contains("active") || card.classList.contains("collapsed")) return;
+    const d = await fetchJson("/api/busmon", { cache: "no-store" });
+    if (d && Array.isArray(d.ids)) render(d);
+  }
+
+  async function post(url, method) {
+    await fetchJson(url, { method: method || "POST" });
+    prev = null;
+    poll();
+  }
+
+  document.getElementById("busMonReset").addEventListener("click", () => post("/api/busmon/reset"));
+  document.getElementById("busMonBaseline").addEventListener("click", () => {
+    if (confirm("Save the IDs seen so far as the baseline? Anything outside it will show as NEW.")) post("/api/busmon/baseline");
+  });
+  document.getElementById("busMonBaselineClear").addEventListener("click", () => post("/api/busmon/baseline", "DELETE"));
+  setInterval(poll, 2000);
+
+  // Sleep log: fetched when opened. "b<boot> t<seconds> ..." -> "+1h02m ...".
+  const logDetails = document.getElementById("busLogDetails");
+  const logPre = document.getElementById("busLogEvents");
+  if (logDetails && logPre) {
+    logDetails.addEventListener("toggle", async () => {
+      if (!logDetails.open) return;
+      try {
+        const [meta, text] = await Promise.all([
+          fetchJson("/api/buslog", { cache: "no-store" }),
+          fetch("/api/buslog/events", { cache: "no-store" }).then((r) => r.text()),
+        ]);
+        const here = meta ? "b" + meta.boot : "";
+        logPre.textContent = text.trim().split("\n").filter(Boolean).map((line) => {
+          const m = line.match(/^(b\d+) t(\d+) (.*)$/);
+          if (!m) return line;
+          const s = +m[2];
+          const t = "+" + Math.floor(s / 3600) + "h" + String(Math.floor((s % 3600) / 60)).padStart(2, "0") + "m";
+          return (m[1] === here ? t : m[1] + " " + t) + "  " + m[3];
+        }).reverse().join("\n") || "No events yet.";
+      } catch (e) {
+        logPre.textContent = "Could not load the log.";
+      }
+    });
+  }
 }
