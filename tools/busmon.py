@@ -101,9 +101,10 @@ def cmd_log(a):
     current boot get a wall-clock time, older boots keep their uptime."""
     now = time.time()
     d = call(a.host, "/api/buslog")
-    req = urllib.request.Request(f"http://{a.host}/api/buslog/events")
-    with urllib.request.urlopen(req, timeout=10) as r:
-        events = r.read().decode(errors="replace").splitlines()
+    events = []
+    for q in ("?old=1", ""):  # rotated file first, then the current one
+        with urllib.request.urlopen(f"http://{a.host}/api/buslog/events{q}", timeout=10) as r:
+            events += r.read().decode(errors="replace").splitlines()
     boot0 = now - d["uptimeS"]
     wall = lambda up: time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(boot0 + up))  # noqa: E731
     print(f"boot #{d['boot']}, up {ago(d['uptimeS'] * 1000)}; quiet now: car={d['quiet'][0]} haldex={d['quiet'][1]}")
