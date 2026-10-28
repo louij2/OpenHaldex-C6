@@ -1,7 +1,24 @@
 {
   "product": "OpenHaldex-C6",
-  "latest": "9.13.0",
+  "latest": "9.13.1",
   "releases": [
+    {
+      "version": "9.13.1",
+      "channel": "stable",
+      "date": "2026-10-28",
+      "ota": true,
+      "notes": "fixes for 9.13.0 found on the first car run:; Phone OTA in the car could leave the web UI wiped (recovery page): the safety gate was re-checked on every upload chunk, and one flicker of a CAN-derived flag mid-upload made the filesystem path erase the partition. The gate is now checked once, before anything is written; a firmware reboot is still gated and waits for the next power-on if the car is no longer safe. The sleep log no longer writes to LittleFS while a filesystem update is running; GET /api/busmon could truncate and take WiFi down: it buffered the whole body in ~40 KB of free heap. It (and /api/buslog) are now rendered in chunks from a small snapshot, with a low-memory 503 instead of a crash; /api/buslog/events streams from the file (?old=1 for the rotated one); About 14 KB of RAM back: 100-ID table (was 200), 12 h of samples (was 48 h; long history is for tower), smaller log task stack",
+      "firmware": {
+        "path": "V9.13.1/firmware.bin",
+        "size": 1336624,
+        "sha256": "d5da8a1d5d24d558c8f02668d27116a8ad9d985dd7dd1ae8b8ea1745d3efb874"
+      },
+      "filesystem": {
+        "path": "V9.13.1/littlefs.bin",
+        "size": 720896,
+        "sha256": "7d1e2f4f952c4ffe78cfed4c333af3af02ebc7f3c0cfdfed5355e8f10a3be0d6"
+      }
+    },
     {
       "version": "9.13.0",
       "channel": "stable",
