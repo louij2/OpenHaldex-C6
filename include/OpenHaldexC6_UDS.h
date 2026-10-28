@@ -63,3 +63,13 @@ void udsMQBTask(void *arg);
 // KWP session and sweeps measuring-block groups, dumping the raw response bytes
 // into kwpTp20RawDump for capture. Frames are routed via tp20RxQueue.
 void kwpTp20Task(void *arg);
+
+// ---- Fault codes (DTCs) on the Gen5-family Haldex (UDS, same channel as the poller) ----
+// ReadDTCInformation 0x19 0x02 / ClearDiagnosticInformation 0x14 FFFFFF, run by
+// udsMQBTask between polls (or on their own when live diagnostics are off), so the
+// web server never blocks and nothing competes for 0x779. Start a job, then poll
+// dtcStatusJson() until it reports done/error.
+bool dtcStartJob(bool clear, const char **why); // false + reason if a job can't start now
+void dtcStatusJson(JsonDocument &out);
+extern volatile bool udsDtcJobActive; // a DTC job owns the channel (keeps the 0x779 tap open)
+

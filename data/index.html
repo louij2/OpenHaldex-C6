@@ -906,6 +906,19 @@
                 </div>
             </section>
 
+            <section class="card" id="dtcCard">
+                <h2>Fault Codes (DTC)</h2>
+                <p class="hint">Reads and clears the Haldex module's stored fault codes over its diagnostic
+                    channel (Gen5 units: 50/51/52). Ignition on. Clearing needs the car stationary and asks
+                    first; codes that come straight back are active faults. Also at <code>/api/dtc</code>.</p>
+                <p class="hint" id="dtcStatus">--</p>
+                <div class="busmon-wrap"><table class="busmon-table" id="dtcTable"></table></div>
+                <div class="wifi-controls">
+                    <button class="btn-secondary" id="dtcRead">Read Codes</button>
+                    <button class="btn-secondary" id="dtcClear">Clear Codes</button>
+                </div>
+            </section>
+
             <section class="card" id="busMonCard">
                 <h2>Bus Monitor</h2>
                 <p class="hint">Every CAN ID the controller has received since the last reset, on each side:
