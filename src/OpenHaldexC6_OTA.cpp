@@ -1,4 +1,5 @@
 #include <OpenHaldexC6_OTA.h>
+#include <OpenHaldexC6_BusMonitor.h> // busLogHoldFs()
 #include <Update.h>
 #include <LittleFS.h>
 #include <mbedtls/sha256.h>
@@ -333,9 +334,11 @@ void handleOTAUpdate(AsyncWebServerRequest *request, String filename, size_t ind
   if (index == 0) { fwResult.set = false; fwStarted = false; }
   if (fwResult.set) return; // outcome already decided - drain the rest of the body
 
-  // SAFETY CHECK: Block update if system is not safe
-  if (!isSystemSafeForOTA()) {
-    if (fwStarted) { esp_ota_abort(otaHandle); otaUpdateInProgress = false; fwStarted = false; }
+  // SAFETY CHECK at the start only. Writing the inactive slot changes nothing
+  // the car sees; what matters is the reboot at the end, which is gated again
+  // in finishFirmwareRequest(). 9.13.0 and earlier re-checked every chunk, so
+  // one flicker of a CAN flag in the car aborted a good upload.
+  if (index == 0 && !isSystemSafeForOTA()) {
     otaSetResult(fwResult, 403, "OTA BLOCKED: System not in safe state. Vehicle must be stationary, CAN initialized, outputs safe, no faults.");
     return;
   }
@@ -391,6 +394,15 @@ void handleOTAUpdate(AsyncWebServerRequest *request, String filename, size_t ind
 // Runs after the body: send the outcome, then reboot if a firmware image was
 // just installed.
 static void finishFirmwareRequest(AsyncWebServerRequest *request) {
+  if (fwRebootPending && !isSystemSafeForOTA()) {
+    // Installed and set as the boot image, but not safe to restart right now
+    // (e.g. the car started moving during the upload): it takes over at the
+    // next power-on instead.
+    fwRebootPending = false;
+    otaUpdateInProgress = false;
+    fwResult.set = false;
+    otaSetResult(fwResult, 200, "Firmware installed, but the car is not in a safe state to restart now. It will start at the next power-on.");
+  }
   otaSendResult(request, fwResult, "No file received - pick firmware.bin first.");
   if (!fwRebootPending) return;
   delay(1000); // let the response leave
@@ -429,6 +441,7 @@ static void fsUpdateFail(int code, const String &msg, bool wipe = true) {
   Update.abort();
   if (wipe) fsInvalidate(); else fsMountSafe();
   otaUpdateInProgress = false;
+  busLogHoldFs(false);
   otaSetResult(fsResult, code, msg);
 }
 
@@ -437,10 +450,13 @@ void handleFSUpdate(AsyncWebServerRequest *request, String filename, size_t inde
   if (index == 0) { fsResult.set = false; fsBytesReceived = 0; fsHeadRxLen = 0; }
   if (fsResult.set) return; // outcome already decided - drain the rest of the body
 
-  // SAFETY CHECK: Block update if system is not safe
-  if (!isSystemSafeForOTA()) {
-    if (index == 0) otaSetResult(fsResult, 403, "OTA BLOCKED: System not in safe state."); // nothing written
-    else fsUpdateFail(403, "OTA BLOCKED: system left the safe state mid-upload - re-upload the filesystem");
+  // SAFETY CHECK at the start only, before anything is erased. The web UI
+  // partition can't affect the car, and 9.13.0 and earlier re-checked every
+  // chunk: in the car a single flicker of the speed / bus-fault / temp flag
+  // mid-upload hit fsUpdateFail(), which wipes the partition - the phone OTA
+  // then left the unit on the recovery page.
+  if (index == 0 && !isSystemSafeForOTA()) {
+    otaSetResult(fsResult, 403, "OTA BLOCKED: System not in safe state."); // nothing written
     return;
   }
 
@@ -450,6 +466,7 @@ void handleFSUpdate(AsyncWebServerRequest *request, String filename, size_t inde
     otaUpdateInProgress = true;
     OTA_DEBUG("[OTA] Starting filesystem update: %s (%s bytes expected)", filename.c_str(),
           request->hasParam("size") ? request->getParam("size")->value().c_str() : "?");
+    busLogHoldFs(true); // wait out any sleep-log append, and keep it off the partition
     LittleFS.end(); // nothing may read the partition while it is being rewritten
     if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_SPIFFS)) {
       fsUpdateFail(500, "OTA ERROR: Failed to begin filesystem update", false);
@@ -506,6 +523,7 @@ void handleFSUpdate(AsyncWebServerRequest *request, String filename, size_t inde
     // Filesystem does NOT reboot: the two-step OTA flow uploads the filesystem
     // first (step 1), then the firmware (step 2) reboots at the end.
     otaUpdateInProgress = false;
+    busLogHoldFs(false);
     otaSetResult(fsResult, 200, "Filesystem update complete.");
 
     // brief green confirmation flash

@@ -3768,7 +3768,7 @@ function initBusMonitor() {
     if (confirm("Save the IDs seen so far as the baseline? Anything outside it will show as NEW.")) post("/api/busmon/baseline");
   });
   document.getElementById("busMonBaselineClear").addEventListener("click", () => post("/api/busmon/baseline", "DELETE"));
-  setInterval(poll, 2000);
+  setInterval(poll, 5000); // the device renders this in chunks; no need to hammer it
 
   // Sleep log: fetched when opened. "b<boot> t<seconds> ..." -> "+1h02m ...".
   const logDetails = document.getElementById("busLogDetails");
@@ -3779,7 +3779,8 @@ function initBusMonitor() {
       try {
         const [meta, text] = await Promise.all([
           fetchJson("/api/buslog", { cache: "no-store" }),
-          fetch("/api/buslog/events", { cache: "no-store" }).then((r) => r.text()),
+          Promise.all(["/api/buslog/events?old=1", "/api/buslog/events"].map((u) =>
+            fetch(u, { cache: "no-store" }).then((r) => r.text()))).then((t) => t.join("\n")),
         ]);
         const here = meta ? "b" + meta.boot : "";
         logPre.textContent = text.trim().split("\n").filter(Boolean).map((line) => {

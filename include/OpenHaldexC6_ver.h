@@ -2,7 +2,7 @@
 #include <OpenHaldexC6_defs.h>
 
 // Current firmware version
-#define FW_VERSION "9.13.0" // also bump data/version.json ("fs")
+#define FW_VERSION "9.13.1" // also bump data/version.json ("fs")
 
 // Fork versioning: upstream (Forbes-Automotive) numbers releases X.00.Y - the
 // middle field is always 00. This fork uses the middle field instead (9.10.0,
@@ -306,4 +306,19 @@ V9.13.0 - Diagnostics: "Bus Monitor" card and GET /api/busmon. A passive
           low-power sleep/wake. Answers "did the bus really sleep, and what
           woke it" without anyone watching. `busmon.py log` prints it with
           wall-clock times.
+V9.13.1 - fixes for 9.13.0 found on the first car run:
+        - Phone OTA in the car could leave the web UI wiped (recovery page):
+          the safety gate was re-checked on every upload chunk, and one
+          flicker of a CAN-derived flag mid-upload made the filesystem path
+          erase the partition. The gate is now checked once, before anything
+          is written; a firmware reboot is still gated and waits for the next
+          power-on if the car is no longer safe. The sleep log no longer
+          writes to LittleFS while a filesystem update is running.
+        - GET /api/busmon could truncate and take WiFi down: it buffered the
+          whole body in ~40 KB of free heap. It (and /api/buslog) are now
+          rendered in chunks from a small snapshot, with a low-memory 503
+          instead of a crash; /api/buslog/events streams from the file
+          (?old=1 for the rotated one).
+        - About 14 KB of RAM back: 100-ID table (was 200), 12 h of samples
+          (was 48 h; long history is for tower), smaller log task stack.
 */
