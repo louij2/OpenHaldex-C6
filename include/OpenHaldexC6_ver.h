@@ -2,7 +2,7 @@
 #include <OpenHaldexC6_defs.h>
 
 // Current firmware version
-#define FW_VERSION "9.14.0" // also bump data/version.json ("fs")
+#define FW_VERSION "9.14.1" // also bump data/version.json ("fs")
 
 // Fork versioning: upstream (Forbes-Automotive) numbers releases X.00.Y - the
 // middle field is always 00. This fork uses the middle field instead (9.10.0,
@@ -330,4 +330,12 @@ V9.14.0 - Diagnostics: "Fault Codes (DTC)" card and /api/dtc. Reads and
           polls (or on its own with live diagnostics off), so the web server
           never blocks; falls back to the extended session only if the module
           asks for it.
+V9.14.1 - The car's drivetrain CAN bus never went to sleep with OpenHaldex
+          fitted: the OpenHaldex status frame (0x6B0) was sent on the chassis
+          bus every 200 ms unconditionally - the "Broadcast OpenHaldex over
+          CAN" setting was ignored - so the ECUs kept seeing traffic after
+          locking, the bus stayed busy, and the controller's own low-power
+          sleep never triggered either. It is now sent only when that setting
+          is on, and only while the Haldex side is awake (stops 5 s after it
+          goes quiet).
 */
