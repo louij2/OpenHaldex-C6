@@ -1,7 +1,24 @@
 {
   "product": "OpenHaldex-C6",
-  "latest": "9.14.0",
+  "latest": "9.14.1",
   "releases": [
+    {
+      "version": "9.14.1",
+      "channel": "stable",
+      "date": "2026-10-28",
+      "ota": true,
+      "notes": "The car's drivetrain CAN bus never went to sleep with OpenHaldex fitted: the OpenHaldex status frame (0x6B0) was sent on the chassis bus every 200 ms unconditionally - the \"Broadcast OpenHaldex over CAN\" setting was ignored - so the ECUs kept seeing traffic after locking, the bus stayed busy, and the controller's own low-power sleep never triggered either. It is now sent only when that setting is on, and only while the Haldex side is awake (stops 5 s after it goes quiet)",
+      "firmware": {
+        "path": "V9.14.1/firmware.bin",
+        "size": 1342608,
+        "sha256": "485cd29c3b9a769b2c51c4c65d36a87702ae3034411df36dde43e43f094c85b6"
+      },
+      "filesystem": {
+        "path": "V9.14.1/littlefs.bin",
+        "size": 720896,
+        "sha256": "f4913d3a609f56dcefde853af69d5932bc024691b80cd1b405385e41f70944fd"
+      }
+    },
     {
       "version": "9.14.0",
       "channel": "stable",
