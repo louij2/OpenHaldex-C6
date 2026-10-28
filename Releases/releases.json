@@ -1,7 +1,24 @@
 {
   "product": "OpenHaldex-C6",
-  "latest": "9.13.1",
+  "latest": "9.14.0",
   "releases": [
+    {
+      "version": "9.14.0",
+      "channel": "stable",
+      "date": "2026-10-28",
+      "ota": true,
+      "notes": "Diagnostics: \"Fault Codes (DTC)\" card and /api/dtc. Reads and clears the Haldex module's stored fault codes over its UDS channel (Gen5 family: 50/51/52), with status (active / confirmed / pending / warning lamp). Clearing needs an explicit confirm and the car stationary, then reads back so faults that return straight away show as active. Runs on the existing diagnostic task between live polls (or on its own with live diagnostics off), so the web server never blocks; falls back to the extended session only if the module asks for it",
+      "firmware": {
+        "path": "V9.14.0/firmware.bin",
+        "size": 1342576,
+        "sha256": "89bbcd269d65464b778daab8d88465fca6a3460731fe50d876578ad3ba82a1d6"
+      },
+      "filesystem": {
+        "path": "V9.14.0/littlefs.bin",
+        "size": 720896,
+        "sha256": "a6372862feca67d5ac5a35d9ac8e6526e43e1cab7f9f369810932df5da97c77d"
+      }
+    },
     {
       "version": "9.13.1",
       "channel": "stable",
