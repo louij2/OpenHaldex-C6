@@ -2,7 +2,7 @@
 #include <OpenHaldexC6_defs.h>
 
 // Current firmware version
-#define FW_VERSION "9.13.1" // also bump data/version.json ("fs")
+#define FW_VERSION "9.14.0" // also bump data/version.json ("fs")
 
 // Fork versioning: upstream (Forbes-Automotive) numbers releases X.00.Y - the
 // middle field is always 00. This fork uses the middle field instead (9.10.0,
@@ -321,4 +321,13 @@ V9.13.1 - fixes for 9.13.0 found on the first car run:
           (?old=1 for the rotated one).
         - About 14 KB of RAM back: 100-ID table (was 200), 12 h of samples
           (was 48 h; long history is for tower), smaller log task stack.
+V9.14.0 - Diagnostics: "Fault Codes (DTC)" card and /api/dtc. Reads and
+          clears the Haldex module's stored fault codes over its UDS channel
+          (Gen5 family: 50/51/52), with status (active / confirmed / pending /
+          warning lamp). Clearing needs an explicit confirm and the car
+          stationary, then reads back so faults that return straight away
+          show as active. Runs on the existing diagnostic task between live
+          polls (or on its own with live diagnostics off), so the web server
+          never blocks; falls back to the extended session only if the module
+          asks for it.
 */

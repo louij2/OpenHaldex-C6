@@ -965,6 +965,47 @@ void setupAPI()
                      otaNoteWebActivity(); // a browser is on the UI - hold WiFi up even if it came in via the home router
                      statusOutgoing(request); });
 
+    // ---- Fault codes (DTCs) on the Haldex - jobs run in udsMQBTask ----
+    // Specific routes first - "/api/dtc" would otherwise swallow them.
+
+    // POST /api/dtc/read - start reading the Haldex fault codes; poll GET /api/dtc
+    webServer.on("/api/dtc/read", HTTP_POST, [](AsyncWebServerRequest *request)
+                 {
+                     const char *why;
+                     const bool ok = dtcStartJob(false, &why);
+                     JsonDocument resp;
+                     resp["ok"] = ok;
+                     if (!ok) resp["error"] = why;
+                     sendJSON(request, ok ? 202 : 409, resp); });
+
+    // POST /api/dtc/clear {"confirm":"CLEAR"} - clear them (car stationary), then read back
+    webServer.on(
+        "/api/dtc/clear", HTTP_POST, [](AsyncWebServerRequest *request) {},
+        nullptr,
+        [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+        { parseJSON(request, data, len, index, total, [](AsyncWebServerRequest *request, const String &body)
+                    {
+                        JsonDocument in, resp;
+                        if (deserializeJson(in, body) || String((const char *)(in["confirm"] | "")) != "CLEAR")
+                        {
+                            resp["ok"] = false;
+                            resp["error"] = "Clearing needs {\"confirm\":\"CLEAR\"}";
+                            sendJSON(request, 400, resp);
+                            return;
+                        }
+                        const char *why;
+                        const bool ok = dtcStartJob(true, &why);
+                        resp["ok"] = ok;
+                        if (!ok) resp["error"] = why;
+                        sendJSON(request, ok ? 202 : 409, resp); }); });
+
+    // GET /api/dtc - state (idle/busy/done/error), message, and the codes from the last job
+    webServer.on("/api/dtc", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
+                     JsonDocument resp;
+                     dtcStatusJson(resp);
+                     sendJSON(request, 200, resp); });
+
     // ---- Passive bus monitor (read-only census of every ID on both sides) ----
     // None of these call otaNoteWebActivity(): watching the bus from a tower
     // or phone must never be what keeps the controller (and the car) awake.

@@ -77,6 +77,7 @@ function initApp() {
   initUpdateCheck();
   initCollapsibleCards();
   initBusMonitor();
+  initDtc();
   initGaugeUI();
   drawTuneChart();
   startIntroSweep(); // last: everything above is drawn; sweeps once the window has loaded and the first poll is in
@@ -3796,3 +3797,58 @@ function initBusMonitor() {
     });
   }
 }
+
+// Fault codes card (Diagnostics). The device runs the job on its diagnostic
+// task; we start it, then poll /api/dtc until it reports done or error.
+function initDtc() {
+  const status = document.getElementById("dtcStatus");
+  const table = document.getElementById("dtcTable");
+  const readBtn = document.getElementById("dtcRead");
+  const clearBtn = document.getElementById("dtcClear");
+  if (!status || !table || !readBtn || !clearBtn) return;
+
+  const flags = (d) => [d.active && "active", d.confirmed && "confirmed", d.pending && "pending", d.warning && "warning lamp"]
+    .filter(Boolean).join(", ") || "stored";
+
+  function render(d) {
+    if (!d) { status.textContent = "Controller not reachable."; return; }
+    if (d.state === "busy") { status.textContent = "Talking to the Haldex\u2026"; return; }
+    if (d.state === "idle") { status.textContent = "Not read yet."; table.innerHTML = ""; return; }
+    status.textContent = d.message || d.state;
+    status.style.color = d.state === "error" ? "var(--danger)" : "";
+    const list = d.dtcs || [];
+    table.innerHTML = list.length
+      ? "<tr><th>Code</th><th>Raw</th><th>Status</th></tr>" + list.map((x) =>
+          `<tr class="${x.active ? "busmon-new" : ""}"><td>${x.code}</td><td>${x.raw}</td><td>${flags(x)}</td></tr>`).join("") +
+        (d.truncated ? "<tr><td colspan=3>More codes than shown.</td></tr>" : "")
+      : "";
+  }
+
+  async function run(url, body) {
+    readBtn.disabled = clearBtn.disabled = true;
+    status.style.color = "";
+    try {
+      const r = await fetch(url, { method: "POST", headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { status.textContent = j.error || "Could not start (" + r.status + ")."; status.style.color = "var(--danger)"; return; }
+      status.textContent = "Talking to the Haldex\u2026";
+      for (let i = 0; i < 40; i++) { // up to ~20 s
+        await new Promise((res) => setTimeout(res, 500));
+        const d = await fetchJson("/api/dtc", { cache: "no-store" });
+        if (d && d.state !== "busy") { render(d); return; }
+      }
+      status.textContent = "No result yet - press Read Codes again in a moment.";
+    } finally {
+      readBtn.disabled = clearBtn.disabled = false;
+    }
+  }
+
+  readBtn.addEventListener("click", () => run("/api/dtc/read"));
+  clearBtn.addEventListener("click", () => {
+    if (confirm("Clear all Haldex fault codes? Note them down first - they can't be read back after clearing.")) {
+      run("/api/dtc/clear", { confirm: "CLEAR" });
+    }
+  });
+  fetchJson("/api/dtc", { cache: "no-store" }).then(render);
+}
+

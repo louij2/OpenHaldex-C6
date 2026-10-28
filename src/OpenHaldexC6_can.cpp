@@ -1173,7 +1173,7 @@ void parseCAN_hdx(void *arg)
       // did not ask for. The moment a real tool is seen on Bus 0 the poller backs
       // off and replies are forwarded again (VCDS / gauge passthrough intact).
       bool udsSuppressForward = false;
-      if (liveDiagEnabled && udsRxQueue != nullptr && rx_message_hdx.identifier == udsHaldexRespId)
+      if ((liveDiagEnabled || udsDtcJobActive) && udsRxQueue != nullptr && rx_message_hdx.identifier == udsHaldexRespId)
       {
         if (xQueueSend(udsRxQueue, &rx_message_hdx, 0) != pdTRUE)
         {

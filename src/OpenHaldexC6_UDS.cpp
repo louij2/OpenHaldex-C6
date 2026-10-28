@@ -163,6 +163,226 @@ static bool udsSessionControl(uint32_t reqId, uint8_t session, uint32_t windowMs
     }
 }
 
+// ---------------------------------------------------------------------------
+// Fault codes (DTCs). Generic UDS: ReadDTCInformation 0x19 0x02 (report by
+// status mask) and ClearDiagnosticInformation 0x14 FFFFFF (all groups). Run by
+// udsMQBTask so they share its channel and RX queue.
+// ---------------------------------------------------------------------------
+static const uint8_t kDtcMax = 20;
+struct DtcRecord { uint32_t code; uint8_t status; };
+enum DtcState : uint8_t { DTC_IDLE, DTC_QUEUED, DTC_RUNNING, DTC_DONE, DTC_ERROR };
+
+volatile bool udsDtcJobActive = false;
+static volatile uint8_t dtcState = DTC_IDLE;
+static volatile bool dtcWantClear = false;
+static bool dtcLastWasClear = false;
+static bool dtcClearedOk = false;
+static uint8_t dtcCount = 0;
+static bool dtcTruncated = false;
+static DtcRecord dtcList[kDtcMax];
+static char dtcMsg[80] = "";
+static uint32_t dtcDoneMs = 0;
+static uint8_t dtcBuf[3 + 4 * 40]; // reply buffer, static to spare the 2 KB task stack
+
+static bool udsSendRawFrame(uint32_t canId, const uint8_t *bytes, uint8_t n)
+{
+    twai_message_t msg{};
+    msg.identifier = canId;
+    msg.data_length_code = 8;
+    for (uint8_t i = 0; i < 8; i++) msg.data[i] = i < n ? bytes[i] : 0xAA;
+    return canTransmit(twai_bus_1, &msg);
+}
+
+// Send a single-frame request, collect the full ISO-TP reply. Handles a
+// multi-frame answer (we send the flow control), skips stale replies to the
+// DID poller, and waits on 0x78 response-pending. Returns the reply length
+// (out[0] is 0x7F for a negative response) or 0 on timeout.
+static size_t udsTransact(uint32_t reqId, const uint8_t *req, uint8_t reqLen, uint8_t *out, size_t cap, uint32_t windowMs)
+{
+    if (!udsSendFrame(reqId, req, reqLen)) return 0;
+    const uint8_t posSid = (uint8_t)(req[0] + 0x40);
+    uint32_t deadline = millis() + windowMs;
+    size_t total = 0, got = 0;
+    uint8_t seq = 1;
+    twai_message_t f;
+    while ((int32_t)(deadline - millis()) > 0)
+    {
+        if (xQueueReceive(udsRxQueue, &f, pdMS_TO_TICKS(50)) != pdTRUE) continue;
+        const uint8_t pci = f.data[0] & 0xF0;
+        if (pci == 0x00 && total == 0)
+        {
+            uint8_t len = f.data[0] & 0x0F;
+            if (len < 1 || len > 7) continue;
+            if (f.data[1] == 0x7F && len >= 3 && f.data[2] == req[0])
+            {
+                if (f.data[3] == 0x78) { deadline = millis() + 5000; continue; } // still working
+            }
+            else if (f.data[1] != posSid) continue; // someone else's reply
+            if (len > cap) len = cap;
+            memcpy(out, &f.data[1], len);
+            return len;
+        }
+        if (pci == 0x10 && total == 0)
+        {
+            if (f.data[2] != posSid) continue;
+            total = ((size_t)(f.data[0] & 0x0F) << 8) | f.data[1];
+            if (total > cap) total = cap; // keep what fits; the rest is drained and dropped
+            got = total < 6 ? total : 6;
+            memcpy(out, &f.data[2], got);
+            const uint8_t fc[] = {0x30, 0x00, 0x02}; // continue, no block limit, 2 ms apart
+            udsSendRawFrame(reqId, fc, sizeof(fc));
+            seq = 1;
+            continue;
+        }
+        if (pci == 0x20 && total)
+        {
+            if ((f.data[0] & 0x0F) != seq) return 0; // lost a frame
+            const size_t n = (total - got) < 7 ? (total - got) : 7;
+            memcpy(out + got, &f.data[1], n);
+            got += n;
+            seq = (seq + 1) & 0x0F;
+            if (got >= total) return got;
+        }
+    }
+    return 0;
+}
+
+static bool dtcNrcIsSession(const uint8_t *r, size_t n) { return n >= 3 && r[0] == 0x7F && (r[2] == 0x7E || r[2] == 0x7F || r[2] == 0x33); }
+
+static void dtcFinish(bool ok, const char *msg)
+{
+    strncpy(dtcMsg, msg, sizeof(dtcMsg) - 1);
+    dtcMsg[sizeof(dtcMsg) - 1] = 0;
+    dtcDoneMs = millis();
+    dtcState = ok ? DTC_DONE : DTC_ERROR;
+}
+
+// One request, retried in the extended session if the module wants that.
+// `session` is the session the channel is in now; it is restored afterwards.
+static size_t dtcRequest(uint32_t reqId, uint8_t session, const uint8_t *req, uint8_t reqLen)
+{
+    size_t n = udsTransact(reqId, req, reqLen, dtcBuf, sizeof(dtcBuf), 2000);
+    if (dtcNrcIsSession(dtcBuf, n) && session != 0x03 && udsSessionControl(reqId, 0x03, 1500))
+    {
+        n = udsTransact(reqId, req, reqLen, dtcBuf, sizeof(dtcBuf), 2000);
+        udsSessionControl(reqId, 0x01, 500);
+    }
+    return n;
+}
+
+static bool dtcRead(uint32_t reqId, uint8_t session)
+{
+    const uint8_t req[] = {0x19, 0x02, 0xFF};
+    const size_t n = dtcRequest(reqId, session, req, sizeof(req));
+    if (n == 0) { dtcFinish(false, "No answer from the Haldex (ignition on? Haldex CAN connected?)"); return false; }
+    if (dtcBuf[0] == 0x7F)
+    {
+        snprintf(dtcMsg, sizeof(dtcMsg), "Haldex refused the read (NRC 0x%02X)", n >= 3 ? dtcBuf[2] : 0);
+        dtcFinish(false, dtcMsg);
+        return false;
+    }
+    if (n < 3 || dtcBuf[0] != 0x59 || dtcBuf[1] != 0x02) { dtcFinish(false, "Unexpected reply to the DTC read"); return false; }
+    dtcCount = 0;
+    dtcTruncated = false;
+    for (size_t i = 3; i + 4 <= n; i += 4)
+    {
+        if (dtcCount >= kDtcMax) { dtcTruncated = true; break; }
+        dtcList[dtcCount].code = ((uint32_t)dtcBuf[i] << 16) | ((uint32_t)dtcBuf[i + 1] << 8) | dtcBuf[i + 2];
+        dtcList[dtcCount].status = dtcBuf[i + 3];
+        dtcCount++;
+    }
+    return true;
+}
+
+static void dtcRunJob(uint32_t reqId, uint8_t session)
+{
+    dtcState = DTC_RUNNING;
+    dtcLastWasClear = dtcWantClear;
+    dtcClearedOk = false;
+    if (dtcWantClear)
+    {
+        const uint8_t req[] = {0x14, 0xFF, 0xFF, 0xFF};
+        const size_t n = dtcRequest(reqId, session, req, sizeof(req));
+        if (n == 0) { dtcFinish(false, "No answer to the clear request"); return; }
+        if (dtcBuf[0] == 0x7F)
+        {
+            const uint8_t nrc = n >= 3 ? dtcBuf[2] : 0;
+            snprintf(dtcMsg, sizeof(dtcMsg), nrc == 0x22 ? "Haldex refused the clear: conditions not correct (engine running / moving?)"
+                                                         : "Haldex refused the clear (NRC 0x%02X)", nrc);
+            dtcFinish(false, dtcMsg);
+            return;
+        }
+        dtcClearedOk = (dtcBuf[0] == 0x54);
+        vTaskDelay(pdMS_TO_TICKS(300)); // let the module settle before reading back
+    }
+    if (!dtcRead(reqId, session)) return;
+    if (dtcLastWasClear)
+        dtcFinish(true, dtcCount ? "Cleared. Codes still present are active faults (they came straight back)." : "Cleared. No fault codes.");
+    else
+        dtcFinish(true, dtcCount ? "Fault codes read." : "No fault codes stored.");
+}
+
+static bool dtcChannelAllowed(const char **why)
+{
+    if (!isGen5Family()) { *why = "Fault codes are supported for Gen5 (50/51/52) Haldex units so far"; return false; }
+    if (!hasCANHaldex) { *why = "No Haldex CAN traffic - switch the ignition on"; return false; }
+    if (externalDiagActive()) { *why = "A diagnostic tool is connected - use that, or unplug it and retry"; return false; }
+    if (analyzerMode || analyzerSerial) { *why = "Turn analyzer mode off first"; return false; }
+    return true;
+}
+
+bool dtcStartJob(bool clear, const char **why)
+{
+    *why = "";
+    if (dtcState == DTC_QUEUED || dtcState == DTC_RUNNING) { *why = "A fault-code job is already running"; return false; }
+    if (!dtcChannelAllowed(why)) return false;
+    if (clear && received_vehicle_speed > 0) { *why = "Clearing needs the car stationary"; return false; }
+    dtcWantClear = clear;
+    dtcState = DTC_QUEUED; // picked up by udsMQBTask within ~0.5 s
+    return true;
+}
+
+// SAE J2012 form: letter + 4 digits from the first two bytes, then the
+// failure-type byte, e.g. 0x4F1200 -> "C0F12-00".
+static void dtcFormat(uint32_t code, char *out)
+{
+    static const char kLetter[] = {'P', 'C', 'B', 'U'};
+    const uint8_t a = code >> 16, b = code >> 8, c = code;
+    sprintf(out, "%c%X%X%02X-%02X", kLetter[a >> 6], (a >> 4) & 0x3, a & 0xF, b, c);
+}
+
+void dtcStatusJson(JsonDocument &out)
+{
+    static const char *const kState[] = {"idle", "busy", "busy", "done", "error"};
+    const uint8_t st = dtcState;
+    out["state"] = kState[st];
+    out["op"] = dtcLastWasClear ? "clear" : "read";
+    if (st == DTC_DONE || st == DTC_ERROR)
+    {
+        out["message"] = dtcMsg;
+        out["ageMs"] = millis() - dtcDoneMs;
+    }
+    if (st != DTC_DONE) return;
+    if (dtcLastWasClear) out["cleared"] = dtcClearedOk;
+    out["truncated"] = dtcTruncated;
+    JsonArray arr = out["dtcs"].to<JsonArray>();
+    for (uint8_t i = 0; i < dtcCount; i++)
+    {
+        char code[12], raw[8];
+        dtcFormat(dtcList[i].code, code);
+        sprintf(raw, "%06lX", (unsigned long)dtcList[i].code);
+        const uint8_t s = dtcList[i].status;
+        JsonObject o = arr.add<JsonObject>();
+        o["code"] = code;
+        o["raw"] = raw;
+        o["status"] = s;
+        o["active"] = (s & 0x01) != 0;    // testFailed
+        o["pending"] = (s & 0x04) != 0;   // pendingDTC
+        o["confirmed"] = (s & 0x08) != 0; // confirmedDTC
+        o["warning"] = (s & 0x80) != 0;   // warningIndicatorRequested
+    }
+}
+
 void udsApplyDefaultIds()
 {
     if (udsIdsManual) return; // pinned from the serial lab (DIAGID) - leave alone
@@ -236,6 +456,26 @@ void udsMQBTask(void *arg)
     {
         if (!pollAllowed())
         {
+            // A fault-code job still runs with live diagnostics off: open the
+            // channel just for it, in the default session.
+            const char *why;
+            if (dtcState == DTC_QUEUED)
+            {
+                if (dtcChannelAllowed(&why))
+                {
+                    udsApplyDefaultIds();
+                    udsDtcJobActive = true; // keeps the 0x779 tap open (can.cpp)
+                    udsPollActive = true;
+                    xQueueReset(udsRxQueue);
+                    dtcRunJob(udsHaldexReqId, 0x01);
+                    udsPollActive = false;
+                    udsDtcJobActive = false;
+                }
+                else
+                {
+                    dtcFinish(false, why);
+                }
+            }
             vTaskDelay(pdMS_TO_TICKS(500));
             continue;
         }
@@ -286,6 +526,12 @@ void udsMQBTask(void *arg)
 
         while (pollAllowed())
         {
+            if (dtcState == DTC_QUEUED)
+            {
+                dtcRunJob(kReqId, session); // same channel, between two DID polls
+                lastTP = millis();
+            }
+
             if (session == 0x03 && (millis() - lastTP) >= kTesterMs)
             {
                 // TesterPresent with suppress-positive-response bit set (0x80) - no reply expected
