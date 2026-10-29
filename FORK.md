@@ -26,6 +26,11 @@ done its job.
 - **Phone install guide:** <https://louij2.github.io/OpenHaldex-C6/> (source in
   `site/`). iPhone-only, English and Italian. It installs this fork over OTA
   with no computer, and links the official files for going back.
+- **Diagnostics extras:** bus monitor, sleep log and Haldex fault codes (read /
+  clear), each with an HTTP API. See **[docs/diagnostics.md](docs/diagnostics.md)**.
+- **Smaller web UI:** the LittleFS image is built from gzipped copies of
+  `data/` (`tools/gzip_webui.py`), about half the flash and a quarter of the
+  Wi-Fi traffic per page load.
 - **Switching back to Forbes** from a running fork: OTA tab → *Release source* →
   *Forbes Automotive (official)* → *Check for updates* → *Switch to official*.
 
