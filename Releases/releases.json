@@ -1,7 +1,24 @@
 {
   "product": "OpenHaldex-C6",
-  "latest": "9.14.1",
+  "latest": "9.14.2",
   "releases": [
+    {
+      "version": "9.14.2",
+      "channel": "stable",
+      "date": "2026-11-03",
+      "ota": true,
+      "notes": "The web UI is stored gzipped: the LittleFS image is built from gzipped copies of data/ (tools/gzip_webui.py) and the web server serves the .gz files directly, so the UI is byte-for-byte the same but takes 256 KB of flash instead of 469 KB and each page load moves about a quarter of the data over Wi-Fi. version.json stays plain. New docs/diagnostics.md covers the bus monitor, sleep log, fault codes, OTA behaviour and the CAN broadcast setting",
+      "firmware": {
+        "path": "V9.14.2/firmware.bin",
+        "size": 1342832,
+        "sha256": "3e913c61e08db54e5b0253d6ecf2e0477cf6bd7e654bdc19ea91b854cf07e7e1"
+      },
+      "filesystem": {
+        "path": "V9.14.2/littlefs.bin",
+        "size": 720896,
+        "sha256": "ffb0925a9e819d702c4e992c469c23624497a5dd33ba5f2b41b013040d81d803"
+      }
+    },
     {
       "version": "9.14.1",
       "channel": "stable",
