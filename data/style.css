@@ -1003,3 +1003,13 @@ input, textarea, select, pre, code, [contenteditable] {
   margin: 8px 0 4px;
 }
 .drive-mode-table .input-select { width: 100%; margin: 0; }
+
+/* --- Bus monitor ---------------------------------------------------------- */
+.busmon-wrap { overflow-x: auto; margin: 8px 0; }
+.busmon-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.busmon-table th, .busmon-table td { padding: 3px 6px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border, #333); }
+.busmon-table th:nth-child(-n+2), .busmon-table td:nth-child(-n+2), .busmon-table td:last-child { text-align: left; }
+.busmon-table td:last-child { font-family: ui-monospace, monospace; }
+.busmon-table tr.busmon-new td { color: var(--warning, #f5a623); font-weight: 600; }
+.busmon-table tr.busmon-quiet td { opacity: 0.45; }
+.buslog-events { font-size: 11px; max-height: 260px; overflow: auto; white-space: pre-wrap; }

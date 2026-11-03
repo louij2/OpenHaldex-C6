@@ -2,6 +2,7 @@
 #include <OpenHaldexC6_Calculations.h>
 #include <OpenHaldexC6_Analyzer.h>
 #include <OpenHaldexC6_UDS.h>
+#include <OpenHaldexC6_BusMonitor.h>
 #include <OpenHaldexC6_ESPNow.h> // espNowTapFrame()
 #include <OpenHaldexC6_ChassisOther.h> // Insignia / Focus RS / Volvo P3 chassis decode
 
@@ -453,6 +454,7 @@ void parseCAN_chs(void *arg)
     {
       lastCANChassisTick = millis();
       ++lpChassisFrameCount;
+      busMonitorFrame(rx_message_chs, 0); // passive per-ID census, every mode
       espNowTapFrame(rx_message_chs); // relay to gauges over ESP-NOW (when on) - the frame as the car sent it
 
       // External diagnostic-tool detection (auto-pause of live polling).
@@ -1250,6 +1252,7 @@ void parseCAN_hdx(void *arg)
       lastCANHaldexTick = millis();
       ++lpHaldexFrameCount;
       hdxRxCensus(rx_message_hdx);
+      busMonitorFrame(rx_message_hdx, 1);
 
       // Analyzer mode: queue for GVRET/SLCAN and forward untouched, skipping control logic.
       if (analyzerMode || analyzerSerial)
@@ -1844,7 +1847,7 @@ void parseCAN_hdx(void *arg)
       // did not ask for. The moment a real tool is seen on Bus 0 the poller backs
       // off and replies are forwarded again (VCDS / gauge passthrough intact).
       bool udsSuppressForward = false;
-      if (liveDiagEnabled && udsRxQueue != nullptr && rx_message_hdx.identifier == udsHaldexRespId)
+      if ((liveDiagEnabled || udsDtcJobActive) && udsRxQueue != nullptr && rx_message_hdx.identifier == udsHaldexRespId)
       {
         if (xQueueSend(udsRxQueue, &rx_message_hdx, 0) != pdTRUE)
         {

@@ -1,4 +1,5 @@
 #include <OpenHaldexC6_OTA.h>
+#include <OpenHaldexC6_BusMonitor.h> // busLogHoldFs()
 #include <Update.h>
 #include <LittleFS.h>
 #include <mbedtls/sha256.h>
@@ -463,6 +464,7 @@ static void fsUpdateFail(int code, const String &msg, bool wipe = true) {
   Update.abort();
   if (wipe) fsInvalidate(); else fsMountSafe();
   otaUpdateInProgress = false;
+  busLogHoldFs(false);
   otaSetResult(fsResult, code, msg);
 }
 
@@ -493,6 +495,7 @@ void handleFSUpdate(AsyncWebServerRequest *request, String filename, size_t inde
     otaUpdateInProgress = true;
     OTA_DEBUG("[OTA] Starting filesystem update: %s (%s bytes expected)", filename.c_str(),
           request->hasParam("size") ? request->getParam("size")->value().c_str() : "?");
+    busLogHoldFs(true); // wait out any sleep-log append, and keep it off the partition
     LittleFS.end(); // nothing may read the partition while it is being rewritten
     if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_SPIFFS)) {
       fsUpdateFail(500, "OTA ERROR: Failed to begin filesystem update", false);
@@ -549,6 +552,7 @@ void handleFSUpdate(AsyncWebServerRequest *request, String filename, size_t inde
     // Filesystem does NOT reboot: the two-step OTA flow uploads the filesystem
     // first (step 1), then the firmware (step 2) reboots at the end.
     otaUpdateInProgress = false;
+    busLogHoldFs(false);
     otaSetResult(fsResult, 200, "Filesystem update complete.");
 
     // brief green confirmation flash

@@ -2,7 +2,7 @@
 #include <OpenHaldexC6_defs.h>
 
 // Current firmware version
-#define FW_VERSION "11.00.4" // also bump data/version.json ("fs")
+#define FW_VERSION "11.10.0" // also bump data/version.json ("fs")
 
 /*
 Version Control:
@@ -620,4 +620,21 @@ V11.00.4 - (unreleased) engine temperatures and a faster Live Data refresh.
         > add 'ota' to match existing layout
         > add reduction in throttle/speed off
         > move CAN into interrupt based - ESP_INTR_FLAG_IRAM
+V11.10.0 - louij2 fork rebased onto upstream V11.00.4 (+ "Gen1 lock tweak").
+          Everything from 11.00.x (OEM-spec lock levers on every generation,
+          Haldex health decode, Follow ABS, drive mode force, Bluetooth,
+          ESP-NOW relay) plus the fork's own features, ported from 9.14.2:
+        - Bus monitor (Diagnostics card, /api/busmon): every CAN ID on each
+          side with rate, counts, payload changes, NEW vs a saved baseline.
+        - Sleep log (/api/buslog): when each side goes quiet, what wakes it,
+          12 h of 2-minute samples. Held off LittleFS during an fs OTA.
+        - Fault codes (Diagnostics card, /api/dtc): read / clear the Haldex
+          DTCs on Gen5 units (50/51/52), clear needs a confirm.
+        - OTA "Release source" set to this fork (UPD_FORK); release tooling,
+          CI and the phone install site carried over.
+        NEW PARTITION LAYOUT (0x1C0000 app slots, 0x70000 LittleFS, as upstream
+        since 9.00.5): moving from fork 9.x needs ONE USB flash. NVS sits at the
+        same offset, so settings and the bus-monitor baseline are kept. After
+        that, phone OTA works as before. 11.00.x changes the 0AY lever, so run
+        Learn again after updating.
 */

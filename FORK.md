@@ -1,0 +1,144 @@
+# About this fork
+
+This is a fork of [Forbes-Automotive/OpenHaldex-C6](https://github.com/Forbes-Automotive/OpenHaldex-C6),
+MIT-licensed, maintained by [louij2](https://github.com/louij2). Upstream's
+copyright is preserved in `LICENSE.md`; the hardware and the great majority of
+the firmware are Forbes Automotive's work.
+
+It exists because four fixes and features sat as open pull requests upstream
+with no response, and because two release-process faults were shipping to users.
+Everything here is offered back upstream — if upstream merges it, this fork has
+done its job.
+
+## What differs from upstream
+
+- **The OTA updater points at this repo** (`UPD_REPO` in `data/app.js`). A
+  device running this firmware is offered this fork's releases. Point
+  `UPD_REPO` back at `Forbes-Automotive/OpenHaldex-C6` to track upstream.
+- **Versions use the middle field** of the upstream release we are built on:
+  `11.10.0` = upstream 11.00.x plus this fork's features, `11.10.1` for fixes,
+  `11.11.0` for the next feature. Upstream numbers releases `X.00.Y`, so ours
+  sort above the upstream cut we are based on and cannot collide. Digits and
+  dots only - the updater's folder regex rejects any suffix. (Before 11.10.0
+  the fork was based on 9.00.x and numbered 9.10-9.14 on the old partition
+  layout; moving to 11.10.0 needs one USB flash.)
+- **Releases are built in CI from a tag**, so the binaries and the index that
+  describes them come out of one run.
+- The four carried-over PRs: CLI legacy backup key, favicon + PWA branding,
+  vehicle geometry settings, and the OTA "Latest build" channel.
+- **Phone install guide:** <https://louij2.github.io/OpenHaldex-C6/> (source in
+  `site/`). iPhone-only, English and Italian. It installs this fork over OTA
+  with no computer, and links the official files for going back.
+- **Diagnostics extras:** bus monitor, sleep log and Haldex fault codes (read /
+  clear), each with an HTTP API. See **[docs/diagnostics.md](docs/diagnostics.md)**.
+- **Smaller web UI:** the LittleFS image is built from gzipped copies of
+  `data/` (`tools/gzip_webui.py`), about half the flash and a quarter of the
+  Wi-Fi traffic per page load.
+- **Switching back to Forbes** from a running fork: OTA tab → *Release source* →
+  *Forbes Automotive (official)* → *Check for updates* → *Switch to official*.
+
+## Staying in sync with upstream
+
+Upstream has merged this fork's PRs #39–#43, so most of the old difference is
+gone. Upstream fixes are brought over **by cherry-pick**, not by merging
+`upstream/main`, because upstream 9.00.5+ moved to a new flash layout for
+Bluetooth (#44): app slots 0x1C0000, LittleFS 0x70000. A partition table
+cannot be changed over OTA, so adopting it would force every unit through a USB
+flash and break the phone-only install path. This fork keeps the original
+0x1A0000 / 0xB0000 layout.
+
+Last sync: upstream `4215b76` (9.00.6) → fork 9.12.0, taking #45, #46, #47, #51
+and the #49 line-ending normalisation. Deliberately not taken: #44 and anything
+that needs the new layout.
+
+To sync again: `git fetch upstream`, list `git log <last-synced>..upstream/main`,
+and cherry-pick with `-x -Xrenormalize`, skipping anything that touches
+`src/partitions_4mb.csv`, BLE (`OpenHaldexC6_BLE.*`, NimBLE in `platformio.ini`)
+or the platform version.
+
+## Release process
+
+Releases are never built by hand. To cut one:
+
+1. Bump `FW_VERSION` in `include/OpenHaldexC6_ver.h` **and** `"fs"` in
+   `data/version.json` to the same value. Add a changelog entry in
+   `OpenHaldexC6_ver.h` below the fork-point marker.
+2. Commit and push to `main`.
+3. Tag it: `git tag v9.10.0 && git push origin v9.10.0`
+
+`.github/workflows/release.yml` then builds the firmware and filesystem,
+generates `Releases/releases.json` from the binaries it just built, verifies
+the two agree, commits `Releases/` back to `main` and publishes a GitHub
+release. The tag, `FW_VERSION` and `data/version.json` must all match or the
+run fails deliberately — a mismatch there is how a release gets mislabelled.
+
+To build a release locally instead (needs PlatformIO):
+
+```sh
+pio run -e esp32c6
+pio run -e esp32c6 -t buildfs
+python3 tools/make_release.py add 9.10.0 \
+    --firmware   .pio/build/esp32c6/firmware.bin \
+    --filesystem .pio/build/esp32c6/littlefs.bin \
+    --bootloader .pio/build/esp32c6/bootloader.bin \
+    --partitions .pio/build/esp32c6/partitions.bin
+python3 tools/make_release.py verify
+```
+
+Notes are taken from that version's changelog entry in `OpenHaldexC6_ver.h`
+automatically, so write them there and nowhere else. `--notes` or `--notes-file`
+override it if you need to.
+
+## The release-index problem this fixes
+
+The web updater lists releases from `Releases/releases.json` and reports the
+indexed size while downloading. Upstream had no committed release tooling — the
+index was produced by a local script (`make_release.py`, referenced in the
+9.00.0 changelog but never committed) that was not always re-run after a
+rebuild. Verified against upstream `main` on 2026-10-01:
+
+| Release | Indexed | Actual | Verdict |
+|---|---|---|---|
+| 8.00.1 | matches | matches | fine |
+| 8.00.2 | matches | matches | fine |
+| 8.00.3 | 1 258 688 B | 1 258 880 B | index wrong by 192 B |
+| 9.00.0 | 1 337 792 B | 1 346 368 B | firmware re-uploaded after indexing |
+
+The two cases are different and worth keeping straight:
+
+- **8.00.3 was never touched.** Its `firmware.bin` has exactly one commit
+  (`ee1c2f1`, 2026-07-09) and that blob appears in no other commit.
+  `releases.json` was first written on 2026-09-20, two months later, and
+  back-filled the older releases — getting 8.00.1 and 8.00.2 right and 8.00.3
+  wrong. The binary is sound; the index entry was never correct.
+- **9.00.0 genuinely was rebuilt in place.** Its `firmware.bin` has nine
+  commits, eight on 2026-09-20 and one on **2026-09-30** — after the index was
+  last written. So "V9.0.0" names more than one binary, and you cannot tell
+  which one a unit is running without reading `/ota/info`.
+
+Upstream's response to the symptom was to remove the OTA upload-stream SHA-256
+gate in 9.00.0 ("the gate only ever failed updates when a .bin was rebuilt in
+place without re-running make_release.py"), which removed the detection rather
+than the drift.
+
+Here, `tools/make_release.py verify` runs in CI on every push and fails the
+build if the index and the binaries disagree. Both inherited entries have been
+corrected with `make_release.py reindex`, which records what the files *are* —
+it cannot recover what a stale entry was meant to describe.
+
+## Open work
+
+Gen5 0AY (generation 51) lock behaviour is under investigation — a car reported
+staying FWD in every forced mode, with the engagement gauge showing lock anyway.
+
+Three candidates are written up in **[docs/gen51-notes.md](docs/gen51-notes.md)**
+with the evidence for each. The first — a V9.00.0 regression where the
+speed/throttle gate began applying to force modes and Expert, which previously
+bypassed it — is mitigated in 9.10.1: the dashboard now names the setting
+withholding lock instead of showing a bare "Target: 0%". That is reporting only
+and changes no lock behaviour.
+
+The other two would change how a real car engages AWD and are deliberately
+**not** in any release until a capture says which is right.
+**[docs/gen51-car-test.md](docs/gen51-car-test.md)** is the protocol that
+resolves all three in one session.

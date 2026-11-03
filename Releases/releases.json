@@ -1,158 +1,175 @@
 {
   "product": "OpenHaldex-C6",
-  "latest": "9.00.6",
+  "latest": "9.14.2",
   "releases": [
     {
-      "version": "11.00.4",
-      "channel": "beta",
+      "version": "9.14.2",
+      "channel": "stable",
       "date": "2026-11-03",
       "ota": true,
-      "notes": "Coolant and oil temperature on the Live Data card (PQ Kombi_2, Gen1/2/4/0AY), and a Live Data Refresh option in Display Options to update the live tiles, engagement gauge and lock graph up to 10 times a second. Fixes: OEM-mode lock back to V10 behaviour on Gen1/2/4/0CQ/0AY (the car's brake bits no longer cut the lock; Gen1 parked lock no longer stops at ~42 %), FWD turns the Gen1/2 pump off, OTA from 11.00.2 and older no longer drops to the recovery page. Run Learn Haldex again after updating.",
+      "notes": "The web UI is stored gzipped: the LittleFS image is built from gzipped copies of data/ (tools/gzip_webui.py) and the web server serves the .gz files directly, so the UI is byte-for-byte the same but takes 256 KB of flash instead of 469 KB and each page load moves about a quarter of the data over Wi-Fi. version.json stays plain. New docs/diagnostics.md covers the bus monitor, sleep log, fault codes, OTA behaviour and the CAN broadcast setting",
       "firmware": {
-        "path": "V11.00.4/firmware.bin",
-        "size": 1528784,
-        "sha256": "264bc3ec95facd459e57487038685937726b95501d0514347ba49f2c8801e12e"
+        "path": "V9.14.2/firmware.bin",
+        "size": 1342832,
+        "sha256": "3e913c61e08db54e5b0253d6ecf2e0477cf6bd7e654bdc19ea91b854cf07e7e1"
       },
       "filesystem": {
-        "path": "V11.00.4/littlefs.bin",
-        "size": 458752,
-        "sha256": "649ad917e8c5041322708a855bf689a6b24ba8c240b4917bd410b5d88cb7fc05"
+        "path": "V9.14.2/littlefs.bin",
+        "size": 720896,
+        "sha256": "ffb0925a9e819d702c4e992c469c23624497a5dd33ba5f2b41b013040d81d803"
       }
     },
     {
-      "version": "11.00.3",
-      "channel": "beta",
-      "date": "2026-10-30",
-      "ota": true,
-      "notes": "Web UI stored gzipped (smaller, faster to load), OTA release source for forks, can_capture tool; plus 11.00.2: 0x6B0 broadcast no longer keeps the car awake, OTA safety check once per upload, Volvo P1 Gear setting and frame bisect. Re-released 2026-11-03 with the V11.00.4 fixes: OEM-mode frame edits back to V10 on Gen1/2/4/0CQ/0AY (the car's brake bits no longer cut the lock), FWD turns the Gen1/2 pump off, OTA from 11.00.2 and older no longer drops to the recovery page.",
-      "firmware": {
-        "path": "V11.00.3/firmware.bin",
-        "size": 1527760,
-        "sha256": "6925c38386b31778c7d335c9f58cae0fdc54f7ebded9c28581f5f968ab567e65"
-      },
-      "filesystem": {
-        "path": "V11.00.3/littlefs.bin",
-        "size": 458752,
-        "sha256": "8c78a0fab14253b51664272108dd44f4ccf8e4b33a066bcd74f9792aa1979061"
-      }
-    },
-    {
-      "version": "11.00.2",
-      "channel": "beta",
-      "date": "2026-10-29",
-      "ota": true,
-      "notes": "0x6B0 broadcast no longer keeps the car awake, OTA safety check once per upload, Volvo P1 Gear setting and frame bisect, smaller Espressif libraries (firmware 79.5% of its slot). Re-released 2026-11-03 with the V11.00.4 lock fixes: OEM-mode frame edits back to V10 on Gen1/2/4/0CQ/0AY (the car's brake bits no longer cut the lock), FWD turns the Gen1/2 pump off.",
-      "firmware": {
-        "path": "V11.00.2/firmware.bin",
-        "size": 1527552,
-        "sha256": "d04edf1104a858b980cfa9e91b779078178557f21f9478cb4b3cac12a81f3484"
-      },
-      "filesystem": {
-        "path": "V11.00.2/littlefs.bin",
-        "size": 458752,
-        "sha256": "b709ee3cf4aa7058f8c002d8006394b69ac0a351ecfe57d541d7c9a28889195d"
-      }
-    },
-    {
-      "version": "11.00.1",
-      "channel": "beta",
-      "date": "2026-10-24",
-      "ota": true,
-      "notes": "Volvo P1 (S40 / V50 AWD) as generation 31, from real V50 T5 AWD logs: standalone sends the whole car (22 frames, steering sensor check byte decoded), Haldex engagement shown as 0-100 %, chassis decode (speed, rpm, pedal, brake, handbrake), DSTC off drives Use TC to Force Mode, new Volvo P1 Standalone card (lock source torque / slip, road speed, live readout) and Learn on the P1. OEM-mode frame editing for the P1 comes later.",
-      "firmware": {
-        "path": "V11.00.1/firmware.bin",
-        "size": 1788944,
-        "sha256": "a14a954ef8cdcf8b08b79660fa5a45d046356049337aec8c0a10354e4bc32ac4"
-      },
-      "filesystem": {
-        "path": "V11.00.1/littlefs.bin",
-        "size": 458752,
-        "sha256": "beb161e17128e4637ca6056048c43dd196b78c65c4673fe64598cbf2b2edcac6"
-      }
-    },
-    {
-      "version": "11.00.0",
-      "channel": "beta",
-      "date": "2026-10-23",
-      "ota": true,
-      "notes": "Every generation brought in line with the Haldex units' own code: correct lock bytes in OEM and Standalone, the unit's own fault / limp / over-temp warnings on a new Haldex Warning card, Follow ABS (on by default), Volvo P2 facelift reply decode and the Volvo Gen5 SPC unit. Run Learn Haldex again after updating. Re-released 2026-11-03 with the V11.00.4 lock fixes: OEM-mode frame edits back to V10 on Gen1/2/4/0CQ/0AY (the car's brake bits no longer cut the lock), FWD turns the Gen1/2 pump off.",
-      "firmware": {
-        "path": "V11.00.0/firmware.bin",
-        "size": 1782272,
-        "sha256": "dafd64d75d13c3e2b90d01a9a88cec52ac1f265c0e4c67ab071f928abb125942"
-      },
-      "filesystem": {
-        "path": "V11.00.0/littlefs.bin",
-        "size": 458752,
-        "sha256": "f1f244fcdaba603a0e0bd3e1f7db4d6167c7220252ac3a295a84adb0ab729c33"
-      }
-    },
-    {
-      "version": "10.00.1",
-      "channel": "beta",
-      "date": "2026-10-19",
-      "ota": true,
-      "notes": "MQB drive mode select can force a mode (Comfort = Stock, Sport = 60:40, Race = 50:50, Individual = Expert by default; off until turned on), new Drive Mode card on Diagnostics, Haldex State legend fixed, Force Mode Priority now saves. Not yet driven on a car.",
-      "firmware": {
-        "path": "V10.00.1/firmware.bin",
-        "size": 1774256,
-        "sha256": "a3ce5f7b5fd0b82bacba47395570aa67bcea5a4680ddbb57e9f405b4e875a2b0"
-      },
-      "filesystem": {
-        "path": "V10.00.1/littlefs.bin",
-        "size": 458752,
-        "sha256": "41a2bc97e1b675296938829e91458ac8b069f21b463ab81282d76aae6ab7f19e"
-      }
-    },
-    {
-      "version": "10.00.0",
-      "channel": "beta",
-      "date": "2026-10-18",
-      "ota": true,
-      "notes": "New market: Volvo (P2 Gen2 / Gen3, P3) and SAAB 9-3 XWD early standalone support, CAN at 250 kbit/s for the pre-facelift P2, and speed / throttle / brake / handbrake read on Insignia, Focus RS, Volvo and SAAB. Includes 9.00.7.",
-      "firmware": {
-        "path": "V10.00.0/firmware.bin",
-        "size": 1772368,
-        "sha256": "2a33052db3703144b3e47016cb6c0d75a3e84c6fffb2acdf46d166e97a67cb32"
-      },
-      "filesystem": {
-        "path": "V10.00.0/littlefs.bin",
-        "size": 458752,
-        "sha256": "be0f722ddcdbbc5b260f11e095ba9c5531adfc560f7d93cb9b1eccb4708a1662"
-      }
-    },
-    {
-      "version": "9.00.7",
-      "channel": "beta",
-      "date": "2026-10-18",
-      "ota": true,
-      "notes": "Relay the car's CAN frames to can2gauge gauges over ESP-NOW (Controller Options, off by default). Not yet tested on hardware.",
-      "firmware": {
-        "path": "V9.00.7/firmware.bin",
-        "size": 1768048,
-        "sha256": "7b15d0c3a2c2ed4ac1560083cc63eadd722f9005efa5d83b1e70c6e8729f8bec"
-      },
-      "filesystem": {
-        "path": "V9.00.7/littlefs.bin",
-        "size": 458752,
-        "sha256": "a58d06f54590a5f65727ec36f9b90113f47b0a40c69c7dd9f023aa67e023386a"
-      }
-    },
-    {
-      "version": "9.00.6",
+      "version": "9.14.1",
       "channel": "stable",
-      "date": "2026-10-09",
+      "date": "2026-10-28",
       "ota": true,
-      "notes": "Stock no longer latches high lock, bus-silence zeroing, BLE boot-loop and heap fixes, platform 55.03.312, Long Learn rework, stopped CAN controllers restarted.",
+      "notes": "The car's drivetrain CAN bus never went to sleep with OpenHaldex fitted: the OpenHaldex status frame (0x6B0) was sent on the chassis bus every 200 ms unconditionally - the \"Broadcast OpenHaldex over CAN\" setting was ignored - so the ECUs kept seeing traffic after locking, the bus stayed busy, and the controller's own low-power sleep never triggered either. It is now sent only when that setting is on, and only while the Haldex side is awake (stops 5 s after it goes quiet)",
       "firmware": {
-        "path": "V9.00.6/firmware.bin",
-        "size": 1762032,
-        "sha256": "56def3948e1cfd1feec8d566ac32dc17de681aabf93155e9e86e016a50f0b02c"
+        "path": "V9.14.1/firmware.bin",
+        "size": 1342608,
+        "sha256": "485cd29c3b9a769b2c51c4c65d36a87702ae3034411df36dde43e43f094c85b6"
       },
       "filesystem": {
-        "path": "V9.00.6/littlefs.bin",
-        "size": 458752,
-        "sha256": "721280c92a2678445bf99d2a39e036f505974c93484076e6e18526c7a740a5e6"
+        "path": "V9.14.1/littlefs.bin",
+        "size": 720896,
+        "sha256": "f4913d3a609f56dcefde853af69d5932bc024691b80cd1b405385e41f70944fd"
+      }
+    },
+    {
+      "version": "9.14.0",
+      "channel": "stable",
+      "date": "2026-10-28",
+      "ota": true,
+      "notes": "Diagnostics: \"Fault Codes (DTC)\" card and /api/dtc. Reads and clears the Haldex module's stored fault codes over its UDS channel (Gen5 family: 50/51/52), with status (active / confirmed / pending / warning lamp). Clearing needs an explicit confirm and the car stationary, then reads back so faults that return straight away show as active. Runs on the existing diagnostic task between live polls (or on its own with live diagnostics off), so the web server never blocks; falls back to the extended session only if the module asks for it",
+      "firmware": {
+        "path": "V9.14.0/firmware.bin",
+        "size": 1342576,
+        "sha256": "89bbcd269d65464b778daab8d88465fca6a3460731fe50d876578ad3ba82a1d6"
+      },
+      "filesystem": {
+        "path": "V9.14.0/littlefs.bin",
+        "size": 720896,
+        "sha256": "a6372862feca67d5ac5a35d9ac8e6526e43e1cab7f9f369810932df5da97c77d"
+      }
+    },
+    {
+      "version": "9.13.1",
+      "channel": "stable",
+      "date": "2026-10-28",
+      "ota": true,
+      "notes": "fixes for 9.13.0 found on the first car run:; Phone OTA in the car could leave the web UI wiped (recovery page): the safety gate was re-checked on every upload chunk, and one flicker of a CAN-derived flag mid-upload made the filesystem path erase the partition. The gate is now checked once, before anything is written; a firmware reboot is still gated and waits for the next power-on if the car is no longer safe. The sleep log no longer writes to LittleFS while a filesystem update is running; GET /api/busmon could truncate and take WiFi down: it buffered the whole body in ~40 KB of free heap. It (and /api/buslog) are now rendered in chunks from a small snapshot, with a low-memory 503 instead of a crash; /api/buslog/events streams from the file (?old=1 for the rotated one); About 14 KB of RAM back: 100-ID table (was 200), 12 h of samples (was 48 h; long history is for tower), smaller log task stack",
+      "firmware": {
+        "path": "V9.13.1/firmware.bin",
+        "size": 1336624,
+        "sha256": "d5da8a1d5d24d558c8f02668d27116a8ad9d985dd7dd1ae8b8ea1745d3efb874"
+      },
+      "filesystem": {
+        "path": "V9.13.1/littlefs.bin",
+        "size": 720896,
+        "sha256": "7d1e2f4f952c4ffe78cfed4c333af3af02ebc7f3c0cfdfed5355e8f10a3be0d6"
+      }
+    },
+    {
+      "version": "9.13.0",
+      "channel": "stable",
+      "date": "2026-10-27",
+      "ota": true,
+      "notes": "Diagnostics: \"Bus Monitor\" card and GET /api/busmon. A passive census of every CAN ID received on each side of the controller (car / Haldex): count, rate, first/last seen, payload changes and last payload. Save a baseline (kept in NVS, survives OTA) and IDs outside it show as NEW, baseline IDs gone quiet as missing. Receive-only, works in every mode, and polling it never keeps the controller awake. tools/busmon.py reads, saves and diffs it; Sleep log (same card, GET /api/buslog): 2-minute samples of frames/s and active IDs per side for 48 h, plus an event file on LittleFS: boot (with reset reason), each side going quiet (and the IDs heard last), the ID that woke it and how long it slept, and low-power sleep/wake. Answers \"did the bus really sleep, and what woke it\" without anyone watching. `busmon.py log` prints it with wall-clock times",
+      "firmware": {
+        "path": "V9.13.0/firmware.bin",
+        "size": 1335808,
+        "sha256": "8a220ee7c6aa3abdb098ce09b35c3f246a98c1bdf7fa29fa2b3dc4799d9a291d"
+      },
+      "filesystem": {
+        "path": "V9.13.0/littlefs.bin",
+        "size": 720896,
+        "sha256": "04b24467a4858040b488f6a5588494ca606a74039b0613907226dd26becc34ff"
+      }
+    },
+    {
+      "version": "9.12.1",
+      "channel": "stable",
+      "date": "2026-10-21",
+      "ota": true,
+      "notes": "OTA: releases that don't fit this unit's partitions are no longer offered. \"Switch to official\" previously offered Forbes 9.00.6, which needs the 9.00.5+ Bluetooth layout (0x1C0000 app slots): on this fork's 0x1A0000 / 0xB0000 layout the web UI step would succeed and the firmware step then fail, leaving a mismatched unit. It now offers the newest official release that fits (currently 9.00.0) and says newer ones need a USB flash. Same check offered upstream",
+      "firmware": {
+        "path": "V9.12.1/firmware.bin",
+        "size": 1322816,
+        "sha256": "84af43e916a5ab5a4b0020ccd085d8dd16936f539be9d553597f415b9c914bd7"
+      },
+      "filesystem": {
+        "path": "V9.12.1/littlefs.bin",
+        "size": 720896,
+        "sha256": "c916ea8aa817698f4097c3d5085a4edb4fdf077cbc89015e1c90b8302f43ff74"
+      }
+    },
+    {
+      "version": "9.12.0",
+      "channel": "stable",
+      "date": "2026-10-16",
+      "ota": true,
+      "notes": "upstream fixes synced from Forbes-Automotive main (up to 4215b76, upstream 9.00.6), all by Kile Thomson, cherry-picked onto this fork's flash layout:; #51 a stopped CAN controller is now restarted whatever stopped it, and with CAN sleep enabled a no-light-sleep lock is held while awake. Automatic light sleep could power down the TWAI domain with the car running, leaving a controller stopped: no frames to the Haldex. Strong candidate for the Gen5 0AY \"FWD in every mode\" reports - on Luca's S1 (CAN sleep + aggressive on) the Haldex bus was seen to go silent while the chassis bus kept running; #45 Stock no longer feeds the reported engagement back as the lock command (latched high lock until FWD / power cycle). Stock now commands zero forced lock and forwards frames untouched; #46 when a bus goes silent, zero the inputs it latched (speed, pedal, ESP/hazard force flags, ABS valid, reported engagement); #47 default VAG correction factor matches its comment; Line endings normalised to LF across the tree, as upstream #49. NOT taken: upstream #44 Bluetooth LE / DashCAN and the new partition table it needs (app slots 0x1C0000, LittleFS 0x70000). A partition table cannot change over OTA, so taking it would force every unit - including ones updated only from a phone - through a USB flash. This fork stays on the 0x1A0000 / 0xB0000 layout so phone updates keep working. Upstream already carries #39-#43 from this fork",
+      "firmware": {
+        "path": "V9.12.0/firmware.bin",
+        "size": 1322816,
+        "sha256": "1d21f183980d1c19993fb31d3163aa186f215ca208af0cec64e852cc58802c56"
+      },
+      "filesystem": {
+        "path": "V9.12.0/littlefs.bin",
+        "size": 720896,
+        "sha256": "1c3e7ab017fc207e7057163d598902d49cef70ccf18c42ab8f8147fa8da850c2"
+      }
+    },
+    {
+      "version": "9.11.0",
+      "channel": "stable",
+      "date": "2026-10-16",
+      "ota": true,
+      "notes": "OTA tab: \"Release source\" switch between this fork and the official Forbes Automotive releases. On the Forbes source every stable official release is offered as a switch back (not hidden as a rollback), the install button and confirmation say so plainly, and the fork-only \"Latest build\" channel and rebuild check are hidden. Installing one returns the unit to the official firmware, whose own updater follows Forbes from then on; the hint and confirmation name the fork's website as the way back. Kept in this browser only; Phone install guide published at louij2.github.io/OpenHaldex-C6 (site/, deployed by .github/workflows/pages.yml): iPhone-only steps in English and Italian, download buttons that always point at the latest release, and official Forbes files for going back; The guide deliberately uploads FIRMWARE FIRST when coming from upstream 9.00.0. Seven different 9.00.0 binaries were published; the five before 16:04 on 2026-09-20 still answer \"200 OK\" after the first upload chunk (the bug 9.00.0's own changelog calls the root cause of OTA never completing) and write the filesystem while it is mounted, with no recovery page. On those, a cut-short firmware upload is refused by esp_ota_end and the unit keeps its old firmware, whereas a cut-short filesystem upload can boot-loop it. Firmware first means the filesystem then goes through this fork's fixed uploader",
+      "firmware": {
+        "path": "V9.11.0/firmware.bin",
+        "size": 1322736,
+        "sha256": "12f65281d8cc14391353c1df894f525fd83ae182b3155fe44c917f26240c25ac"
+      },
+      "filesystem": {
+        "path": "V9.11.0/littlefs.bin",
+        "size": 720896,
+        "sha256": "8366d497032df2016ade42700c78dd68dd33c430ebb063d9d0a0c3449f52fbdd"
+      }
+    },
+    {
+      "version": "9.10.1",
+      "channel": "stable",
+      "date": "2026-10-13",
+      "ota": true,
+      "notes": "removed the dead \"Generation 3 - Volvo\" option from the Haldex Generation dropdown. There is no generation-3 code anywhere in the firmware and /api/settings rejects the value outright (API.cpp accepts only 1/2/4/41/50/51/52), so selecting it was silently ignored - a Volvo owner would read the option as support that does not exist; README: hardware badge said \"Gen1 | Gen2 | Gen4\" and omitted Gen5 entirely; the body text filed all of Gen5 under MQB when 0AY is PQ-based. Both corrected, and the badges now point at this fork rather than reporting upstream's release and commit activity; Dashboard now says WHY lock is being withheld. From 9.00.0 the speed/throttle window gates every lock path - the force-mode triggers and Expert used to bypass it - so an inherited non-zero \"Disengage Under Speed\" or \"Minimum Throttle\" silently zeroes lock in every mode and the only symptom was \"Target: 0%\". /api/dashboard now reports lockGated + lockGateReasons and the UI names the setting and its configured value. lock_enabled() is defined in terms of the new lock_gate_blocking() so the stated reason cannot drift from the decision actually taken; lock behaviour itself is unchanged; Release notes now come from this changelog (make_release.py reads the entry for the version being built) instead of a placeholder string, and nothing from a commit message is interpolated into a shell argument in CI. 9.10.0's own entry was backfilled the same way; Indexed the eight historical releases inherited from upstream (2.10.1 through 7.00.0) with real hashes, so `verify --strict` is clean and every published folder is accounted for. They are marked ota:false - documented and downloadable, but not offered for push-button OTA, since they predate the current OTA page and pushing one over the air would strand the unit's updater. Use Update from Files for those. The set offered to devices is unchanged",
+      "firmware": {
+        "path": "V9.10.1/firmware.bin",
+        "size": 1322736,
+        "sha256": "9f99eab4bfd7d31eaaf44e86f5a17b3ab1ab4687de35ab2fe17447b841536859"
+      },
+      "filesystem": {
+        "path": "V9.10.1/littlefs.bin",
+        "size": 720896,
+        "sha256": "263794e54cdc96d4ebc94d454bd519521b5d540bedb6f17815999507d3dc2034"
+      }
+    },
+    {
+      "version": "9.10.0",
+      "channel": "stable",
+      "date": "2026-10-13",
+      "ota": true,
+      "notes": "first release of the louij2 fork (MIT, upstream remains Forbes-Automotive/OpenHaldex-C6). Versioning moves to the middle field so our releases sort above the upstream cut they branched from and cannot collide with theirs; OTA updater now points at this repo, so devices running this firmware are offered this fork's releases; tools/make_release.py added: builds Releases/releases.json from the actual binaries, with `verify` (CI-enforced) and `reindex` subcommands. Upstream had no committed release tooling, and its index had drifted from the files - V9.00.0's firmware was re-uploaded on 2026-09-30 after the index was written on 2026-09-20 (+8576 bytes), and V8.00.3's entry was back-filled 192 bytes short. Both are corrected here, and `verify` now fails the build if the index and the binaries ever disagree again. Note upstream removed the OTA upload-stream SHA gate in 9.00.0 rather than fix this, so a drifted index was invisible to users; Carried the four PRs upstream left open: WiFi bridge mode / backup & restore / bench mode follow-ups (#40 CLI legacy key), favicon + PWA branding (#41), vehicle geometry settings (#42), and the OTA \"Latest build\" channel (#43)",
+      "firmware": {
+        "path": "V9.10.0/firmware.bin",
+        "size": 1322176,
+        "sha256": "86feb2d8c166e783e34fa97f3268c6d376f941b834a780e887311e84d00f055d"
+      },
+      "filesystem": {
+        "path": "V9.10.0/littlefs.bin",
+        "size": 720896,
+        "sha256": "d514da6f8f750ab1466a027ee3f8fba19655560b42af7f2429687b0862eb3962"
       }
     },
     {
@@ -226,9 +243,9 @@
     {
       "version": "7.00.0",
       "channel": "stable",
-      "date": "2026-10-07",
-      "ota": true,
-      "notes": "",
+      "date": "2026-05-27",
+      "ota": false,
+      "notes": "Added Gen5 (0AY) Haldex support - a Gen2/Gen4 mix on a Gen5 chassis.",
       "firmware": {
         "path": "V7.00.0/firmware.bin",
         "size": 1245216,
@@ -243,9 +260,9 @@
     {
       "version": "6.01.0",
       "channel": "stable",
-      "date": "2026-10-07",
-      "ota": true,
-      "notes": "",
+      "date": "2026-05-18",
+      "ota": false,
+      "notes": "WiFi naming, better low-power sleep, Follow Hazard force mode and hazard source selection.",
       "firmware": {
         "path": "V6.01.0/firmware.bin",
         "size": 1243472,
@@ -260,9 +277,9 @@
     {
       "version": "6.00.0",
       "channel": "stable",
-      "date": "2026-10-07",
-      "ota": true,
-      "notes": "",
+      "date": "2026-05-10",
+      "ota": false,
+      "notes": "Interrupt-based CAN handling, LED brightness, revised hazard force mode and sleep config.",
       "firmware": {
         "path": "V6.00.0/firmware.bin",
         "size": 1237488,
@@ -277,9 +294,9 @@
     {
       "version": "5.00.0",
       "channel": "stable",
-      "date": "2026-10-07",
-      "ota": true,
-      "notes": "",
+      "date": "2026-05-08",
+      "ota": false,
+      "notes": "Added the Fix Hunting option (Motor_11 BPK packing) for 554K controllers.",
       "firmware": {
         "path": "V5.00.0/firmware.bin",
         "size": 1232464,
@@ -294,9 +311,9 @@
     {
       "version": "4.00.2",
       "channel": "stable",
-      "date": "2026-10-07",
-      "ota": true,
-      "notes": "",
+      "date": "2026-05-07",
+      "ota": false,
+      "notes": "Added password protection (4.00.0 Gen41 dual-bus, 4.00.1 low-power mode).",
       "firmware": {
         "path": "V4.00.2/firmware.bin",
         "size": 1232336,
@@ -311,9 +328,9 @@
     {
       "version": "3.00.1",
       "channel": "stable",
-      "date": "2026-10-07",
-      "ota": true,
-      "notes": "",
+      "date": "2026-04-05",
+      "ota": false,
+      "notes": "Added Disable Onboard/External Button options and the Learn Haldex function.",
       "firmware": {
         "path": "V3.00.1/firmware.bin",
         "size": 1221808,
@@ -328,9 +345,9 @@
     {
       "version": "3.00.0",
       "channel": "stable",
-      "date": "2026-10-07",
-      "ota": true,
-      "notes": "",
+      "date": "2026-04-02",
+      "ota": false,
+      "notes": "Added Gen5 support and Gen4 GM/SAAB (logged as generation 41).",
       "firmware": {
         "path": "V3.00.0/firmware.bin",
         "size": 1215472,
@@ -345,9 +362,9 @@
     {
       "version": "2.10.1",
       "channel": "stable",
-      "date": "2026-10-07",
-      "ota": true,
-      "notes": "",
+      "date": "2026-03-29",
+      "ota": false,
+      "notes": "Fixed CAN health always reporting Unhealthy.",
       "firmware": {
         "path": "V2.10.1/firmware.bin",
         "size": 1209344,

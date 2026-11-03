@@ -1,4 +1,5 @@
 #include <OpenHaldexC6_IO.h>
+#include <OpenHaldexC6_BusMonitor.h>
 #include <OpenHaldexC6_can.h>
 #include <OpenHaldexC6_WiFi.h>
 #include <OpenHaldexC6_OTA.h> // otaWebClientActive(): bridge-mode browsers hold WiFi up
@@ -377,6 +378,8 @@ void updateTriggers(void *arg)
     {
       received_haldex_engagement = 0; // stale engagement would freeze telemetry and poison a running learn
     }
+
+    busLogTick(); // sleep logger: samples + quiet/active/low-power events (cheap; file writes happen in its own task)
 
     if (hasCANChassis || hasCANHaldex)
       everSawCANThisSession = true; // real bus seen: bench mode (if on) stops holding WiFi up from here on

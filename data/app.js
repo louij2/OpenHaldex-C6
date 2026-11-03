@@ -106,6 +106,8 @@ function initApp() {
   initOtaPage();
   initUpdateCheck();
   initCollapsibleCards();
+  initBusMonitor();
+  initDtc();
   initGaugeUI();
   drawTuneChart();
   startIntroSweep(); // last: everything above is drawn; sweeps once the window has loaded and the first poll is in
@@ -2469,7 +2471,7 @@ function initWifi() {
 // so nothing changes on screen. The choice is kept in this browser only.
 const UPD_OFFICIAL = { repo: "Forbes-Automotive/OpenHaldex-C6", label: "Forbes Automotive (official)" };
 // e.g. { repo: "someone/OpenHaldex-C6", label: "someone's fork", site: "someone.github.io/OpenHaldex-C6" }
-const UPD_FORK = null;
+const UPD_FORK = { repo: "louij2/OpenHaldex-C6", label: "louij2 fork", site: "louij2.github.io/OpenHaldex-C6" };
 const UPD_SOURCE_KEY = "otaUpdateSource";
 let updSource = UPD_FORK ? "fork" : "official";
 const UPD_BRANCH = "main";
@@ -4347,4 +4349,147 @@ function initGaugeUI() {
   applyGaugePrefs();
   renderLockTrace(Date.now());
   updateEngagementGauge(null, null, true); // empty arc, drawn instantly - the intro sweep starts from here
+}
+
+// Bus monitor card (Diagnostics). Polls /api/busmon only while the card is open
+// on the visible page, and that endpoint doesn't count as UI activity, so an
+// open card never keeps the controller awake on its own.
+function initBusMonitor() {
+  const card = document.getElementById("busMonCard");
+  const table = document.getElementById("busMonTable");
+  const summary = document.getElementById("busMonSummary");
+  const missing = document.getElementById("busMonMissing");
+  if (!card || !table) return;
+
+  const SIDE = ["Car", "Haldex"];
+  let prev = null; // last poll, for bus frames/s
+
+  const ago = (ms) => (ms < 1000 ? ms + " ms" : ms < 60000 ? (ms / 1000).toFixed(1) + " s"
+    : ms < 3600000 ? Math.round(ms / 60000) + " min" : (ms / 3600000).toFixed(1) + " h");
+
+  function render(d) {
+    let fps = "";
+    if (prev && d.uptimeMs > prev.uptimeMs && d.sinceResetMs >= prev.sinceResetMs) {
+      const dt = (d.uptimeMs - prev.uptimeMs) / 1000;
+      fps = " · " + [0, 1].map((b) => SIDE[b] + " " + Math.round((d.frames[b] - prev.frames[b]) / dt) + " fps").join(", ");
+    }
+    prev = d;
+    const nNew = d.ids.filter((e) => e.new).length;
+    summary.textContent = d.idCount + " IDs in " + ago(d.sinceResetMs) + fps +
+      (d.baselineCount ? " · baseline " + d.baselineCount + " IDs, " + nNew + " new, " + d.missing.length + " missing" : " · no baseline saved") +
+      (d.droppedFrames ? " · table full, " + d.droppedFrames + " frames of further IDs not tracked" : "");
+
+    const rows = d.ids.slice().sort((a, b) => a.bus - b.bus || parseInt(a.id, 16) - parseInt(b.id, 16));
+    const head = "<tr><th>Side</th><th>ID</th><th>Hz</th><th>Count</th><th>Last</th><th>Changes</th><th>Data</th></tr>";
+    table.innerHTML = head + rows.map((e) => {
+      const quiet = e.lastAgoMs > 5000 && e.lastAgoMs > 3 * (e.periodMs || 0);
+      const cls = e.new ? "busmon-new" : quiet ? "busmon-quiet" : "";
+      return `<tr class="${cls}"><td>${SIDE[e.bus]}${e.new ? " NEW" : ""}</td><td>${e.id}</td>` +
+        `<td>${e.hz.toFixed(e.hz < 10 ? 2 : 0)}</td><td>${e.count}</td><td>${ago(e.lastAgoMs)}</td>` +
+        `<td>${e.changes}</td><td>${e.data}</td></tr>`;
+    }).join("");
+    missing.textContent = d.missing.length
+      ? "Baseline IDs not seen since reset: " + d.missing.map((m) => SIDE[m.bus] + " " + m.id).join(", ")
+      : "";
+  }
+
+  async function poll() {
+    const page = document.getElementById("diagnostics-page");
+    if (!page || !page.classList.contains("active") || card.classList.contains("collapsed")) return;
+    const d = await fetchJson("/api/busmon", { cache: "no-store" });
+    if (d && Array.isArray(d.ids)) render(d);
+  }
+
+  async function post(url, method) {
+    await fetchJson(url, { method: method || "POST" });
+    prev = null;
+    poll();
+  }
+
+  document.getElementById("busMonReset").addEventListener("click", () => post("/api/busmon/reset"));
+  document.getElementById("busMonBaseline").addEventListener("click", () => {
+    if (confirm("Save the IDs seen so far as the baseline? Anything outside it will show as NEW.")) post("/api/busmon/baseline");
+  });
+  document.getElementById("busMonBaselineClear").addEventListener("click", () => post("/api/busmon/baseline", "DELETE"));
+  setInterval(poll, 5000); // the device renders this in chunks; no need to hammer it
+
+  // Sleep log: fetched when opened. "b<boot> t<seconds> ..." -> "+1h02m ...".
+  const logDetails = document.getElementById("busLogDetails");
+  const logPre = document.getElementById("busLogEvents");
+  if (logDetails && logPre) {
+    logDetails.addEventListener("toggle", async () => {
+      if (!logDetails.open) return;
+      try {
+        const [meta, text] = await Promise.all([
+          fetchJson("/api/buslog", { cache: "no-store" }),
+          Promise.all(["/api/buslog/events?old=1", "/api/buslog/events"].map((u) =>
+            fetch(u, { cache: "no-store" }).then((r) => r.text()))).then((t) => t.join("\n")),
+        ]);
+        const here = meta ? "b" + meta.boot : "";
+        logPre.textContent = text.trim().split("\n").filter(Boolean).map((line) => {
+          const m = line.match(/^(b\d+) t(\d+) (.*)$/);
+          if (!m) return line;
+          const s = +m[2];
+          const t = "+" + Math.floor(s / 3600) + "h" + String(Math.floor((s % 3600) / 60)).padStart(2, "0") + "m";
+          return (m[1] === here ? t : m[1] + " " + t) + "  " + m[3];
+        }).reverse().join("\n") || "No events yet.";
+      } catch (e) {
+        logPre.textContent = "Could not load the log.";
+      }
+    });
+  }
+}
+
+// Fault codes card (Diagnostics). The device runs the job on its diagnostic
+// task; we start it, then poll /api/dtc until it reports done or error.
+function initDtc() {
+  const status = document.getElementById("dtcStatus");
+  const table = document.getElementById("dtcTable");
+  const readBtn = document.getElementById("dtcRead");
+  const clearBtn = document.getElementById("dtcClear");
+  if (!status || !table || !readBtn || !clearBtn) return;
+
+  const flags = (d) => [d.active && "active", d.confirmed && "confirmed", d.pending && "pending", d.warning && "warning lamp"]
+    .filter(Boolean).join(", ") || "stored";
+
+  function render(d) {
+    if (!d) { status.textContent = "Controller not reachable."; return; }
+    if (d.state === "busy") { status.textContent = "Talking to the Haldex\u2026"; return; }
+    if (d.state === "idle") { status.textContent = "Not read yet."; table.innerHTML = ""; return; }
+    status.textContent = d.message || d.state;
+    status.style.color = d.state === "error" ? "var(--danger)" : "";
+    const list = d.dtcs || [];
+    table.innerHTML = list.length
+      ? "<tr><th>Code</th><th>Raw</th><th>Status</th></tr>" + list.map((x) =>
+          `<tr class="${x.active ? "busmon-new" : ""}"><td>${x.code}</td><td>${x.raw}</td><td>${flags(x)}</td></tr>`).join("") +
+        (d.truncated ? "<tr><td colspan=3>More codes than shown.</td></tr>" : "")
+      : "";
+  }
+
+  async function run(url, body) {
+    readBtn.disabled = clearBtn.disabled = true;
+    status.style.color = "";
+    try {
+      const r = await fetch(url, { method: "POST", headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { status.textContent = j.error || "Could not start (" + r.status + ")."; status.style.color = "var(--danger)"; return; }
+      status.textContent = "Talking to the Haldex\u2026";
+      for (let i = 0; i < 40; i++) { // up to ~20 s
+        await new Promise((res) => setTimeout(res, 500));
+        const d = await fetchJson("/api/dtc", { cache: "no-store" });
+        if (d && d.state !== "busy") { render(d); return; }
+      }
+      status.textContent = "No result yet - press Read Codes again in a moment.";
+    } finally {
+      readBtn.disabled = clearBtn.disabled = false;
+    }
+  }
+
+  readBtn.addEventListener("click", () => run("/api/dtc/read"));
+  clearBtn.addEventListener("click", () => {
+    if (confirm("Clear all Haldex fault codes? Note them down first - they can't be read back after clearing.")) {
+      run("/api/dtc/clear", { confirm: "CLEAR" });
+    }
+  });
+  fetchJson("/api/dtc", { cache: "no-store" }).then(render);
 }

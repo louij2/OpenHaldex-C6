@@ -1,3 +1,4 @@
+#include <OpenHaldexC6_BusMonitor.h>
 #include <OpenHaldexC6_API.h>
 #include <OpenHaldexC6_UDS.h>
 #include <OpenHaldexC6_Calculations.h>
@@ -1217,6 +1218,107 @@ void setupAPI()
 
     // GET /api/live - just the Live Data tiles and the lock, for the faster refresh (V11.00.4)
     webServer.on("/api/live", HTTP_GET, liveOutgoing);
+
+    // ---- Fault codes (DTCs) on the Haldex - jobs run in udsMQBTask ----
+    // Specific routes first - "/api/dtc" would otherwise swallow them.
+
+    // POST /api/dtc/read - start reading the Haldex fault codes; poll GET /api/dtc
+    webServer.on("/api/dtc/read", HTTP_POST, [](AsyncWebServerRequest *request)
+                 {
+                     const char *why;
+                     const bool ok = dtcStartJob(false, &why);
+                     JsonDocument resp;
+                     resp["ok"] = ok;
+                     if (!ok) resp["error"] = why;
+                     sendJSON(request, ok ? 202 : 409, resp); });
+
+    // POST /api/dtc/clear {"confirm":"CLEAR"} - clear them (car stationary), then read back
+    webServer.on(
+        "/api/dtc/clear", HTTP_POST, [](AsyncWebServerRequest *request) {},
+        nullptr,
+        [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+        { parseJSON(request, data, len, index, total, [](AsyncWebServerRequest *request, const String &body)
+                    {
+                        JsonDocument in, resp;
+                        if (deserializeJson(in, body) || String((const char *)(in["confirm"] | "")) != "CLEAR")
+                        {
+                            resp["ok"] = false;
+                            resp["error"] = "Clearing needs {\"confirm\":\"CLEAR\"}";
+                            sendJSON(request, 400, resp);
+                            return;
+                        }
+                        const char *why;
+                        const bool ok = dtcStartJob(true, &why);
+                        resp["ok"] = ok;
+                        if (!ok) resp["error"] = why;
+                        sendJSON(request, ok ? 202 : 409, resp); }); });
+
+    // GET /api/dtc - state (idle/busy/done/error), message, and the codes from the last job
+    webServer.on("/api/dtc", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
+                     JsonDocument resp;
+                     dtcStatusJson(resp);
+                     sendJSON(request, 200, resp); });
+
+    // ---- Passive bus monitor (read-only census of every ID on both sides) ----
+    // None of these call otaNoteWebActivity(): watching the bus from a tower
+    // or phone must never be what keeps the controller (and the car) awake.
+    // Specific routes first - "/api/busmon" would otherwise swallow them.
+
+    // POST /api/busmon/reset - forget everything seen so far
+    webServer.on("/api/busmon/reset", HTTP_POST, [](AsyncWebServerRequest *request)
+                 {
+                     busMonitorReset();
+                     JsonDocument resp;
+                     resp["ok"] = true;
+                     sendJSON(request, 200, resp); });
+
+    // POST /api/busmon/baseline - save the current ID set as "normal" (NVS, survives OTA)
+    // DELETE /api/busmon/baseline - drop it
+    webServer.on("/api/busmon/baseline", HTTP_POST, [](AsyncWebServerRequest *request)
+                 {
+                     JsonDocument resp;
+                     resp["ok"] = true;
+                     resp["baselineCount"] = busMonitorSaveBaseline();
+                     sendJSON(request, 200, resp); });
+    webServer.on("/api/busmon/baseline", HTTP_DELETE, [](AsyncWebServerRequest *request)
+                 {
+                     busMonitorClearBaseline();
+                     JsonDocument resp;
+                     resp["ok"] = true;
+                     sendJSON(request, 200, resp); });
+
+    // GET /api/buslog/events[?old=1] - the sleep logger's event lines, streamed
+    // from the file (current, or the rotated previous one) without buffering it
+    webServer.on("/api/buslog/events", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
+                     const char *path = request->hasParam("old") ? BUSLOG_OLD_PATH : BUSLOG_PATH;
+                     if (!fsMounted() || !LittleFS.exists(path))
+                     {
+                         request->send(200, "text/plain", "");
+                         return;
+                     }
+                     AsyncWebServerResponse *res = request->beginResponse(LittleFS, path, "text/plain");
+                     res->addHeader("Cache-Control", "no-store");
+                     request->send(res); });
+
+    // POST /api/buslog/clear - drop the samples and the event files
+    webServer.on("/api/buslog/clear", HTTP_POST, [](AsyncWebServerRequest *request)
+                 {
+                     busLogClear();
+                     JsonDocument resp;
+                     resp["ok"] = true;
+                     sendJSON(request, 200, resp); });
+
+    // GET /api/buslog - 2-minute samples for the last 12 h: [car fps, haldex fps, car IDs, haldex IDs, low-power]
+    webServer.on("/api/buslog", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
+                     busLogSendJson(request); });
+
+    // GET /api/busmon - per-ID list: side, count, rate, first/last seen, payload changes, new-vs-baseline
+    webServer.on("/api/busmon", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
+                     busMonitorSendJson(request); });
 
     // GET /api/uds/read - UDS read-by-identifier helper
     webServer.on("/api/uds/read", HTTP_GET, [](AsyncWebServerRequest *request)

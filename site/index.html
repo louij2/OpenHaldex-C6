@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>OpenHaldex-C6 · louij2 fork</title>
+<meta name="description" content="Install the louij2 fork of OpenHaldex-C6 from an iPhone - no computer needed - and switch back to the official Forbes Automotive firmware any time.">
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #14181d; --muted: #5b6672; --line: #e2e6ea;
+    --accent: #0f9d92; --accent-ink: #ffffff; --warn-bg: #fff6e5; --warn-line: #f0c36d;
+    --code: #eef1f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0f14; --card: #131a22; --text: #e6edf3; --muted: #93a1af; --line: #223040;
+      --accent: #24d1c4; --accent-ink: #062320; --warn-bg: #2a2111; --warn-line: #6b5420;
+      --code: #1b2430;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: max(16px, env(safe-area-inset-top)) 16px 48px; }
+  main { max-width: 640px; margin: 0 auto; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0 20px; }
+  h1 { font-size: 1.35rem; margin: 0; line-height: 1.25; }
+  h1 small { display: block; font-size: .85rem; font-weight: 500; color: var(--muted); }
+  .lang { display: flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; flex-shrink: 0; }
+  .lang button { border: 0; background: transparent; color: var(--muted); padding: 8px 14px; font: inherit; font-weight: 600; }
+  .lang button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; margin: 0 0 14px; }
+  .card h2 { font-size: 1.05rem; margin: 0 0 10px; display: flex; gap: 10px; align-items: center; }
+  .n { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+    background: var(--accent); color: var(--accent-ink); font-size: .85rem; flex-shrink: 0; }
+  ol, ul { margin: 0; padding-left: 1.2em; }
+  li { margin: 4px 0; }
+  .btns { display: grid; gap: 10px; margin: 12px 0 8px; }
+  a.btn { display: block; text-align: center; text-decoration: none; padding: 14px 16px; border-radius: 12px;
+    background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+  a.btn.alt { background: transparent; color: var(--accent); border: 1.5px solid var(--accent); }
+  .muted { color: var(--muted); font-size: .92rem; }
+  .note { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 12px; padding: 12px 14px; margin: 12px 0 0; font-size: .95rem; }
+  code, .kbd { background: var(--code); border-radius: 6px; padding: 1px 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; font-weight: 600; }
+  footer { color: var(--muted); font-size: .85rem; margin-top: 24px; }
+  footer a, .card a:not(.btn) { color: var(--accent); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>OpenHaldex-C6 <small data-i18n="tagline">louij2 fork · install from your iPhone</small></h1>
+    <div class="lang" role="group" aria-label="Language">
+      <button type="button" data-lang="en" aria-pressed="true">EN</button>
+      <button type="button" data-lang="it" aria-pressed="false">IT</button>
+    </div>
+  </header>
+
+  <!-- ============================== ENGLISH ============================== -->
+  <div data-lang-block="en">
+    <section class="card">
+      <p style="margin:0">A community fork of the
+        <a href="https://github.com/Forbes-Automotive/OpenHaldex-C6">Forbes Automotive OpenHaldex-C6</a>
+        firmware, with extra fixes. <strong>Not affiliated with Forbes Automotive.</strong>
+        You only need your iPhone. Your settings normally carry over, and you can switch back to the official
+        firmware at any time.</p>
+      <p class="muted" style="margin:8px 0 0">Latest version: <strong class="latest-fork">…</strong></p>
+    </section>
+
+    <section class="card">
+      <h2>Before you start</h2>
+      <ul>
+        <li>Car <strong>parked</strong>, <strong>engine off</strong>, <strong>ignition on</strong>. The controller refuses updates unless the car is stationary.</li>
+        <li>If your controller has <span class="kbd">Settings → Backup &amp; Restore</span>, tap <span class="kbd">Export Config</span> first. It's your safety net.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">1</span> Download the two files</h2>
+      <p class="muted" style="margin:0">Do this while you still have internet, before going to the car.</p>
+      <div class="btns">
+        <a class="btn" href="https://github.com/louij2/OpenHaldex-C6/releases/latest/download/firmware.bin">Download firmware.bin</a>
+        <a class="btn" href="https://github.com/louij2/OpenHaldex-C6/releases/latest/download/littlefs.bin">Download littlefs.bin</a>
+      </div>
+      <p class="muted" style="margin:0">Safari asks <em>“Download?”</em> → tap <strong>Download</strong>. Both files go to <span class="kbd">Files → Downloads</span>.</p>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">2</span> Connect to the controller</h2>
+      <ol>
+        <li><span class="kbd">Settings → Wi‑Fi</span> → join <strong>OpenHaldex-C6</strong> (or the name you gave it). If the iPhone says <em>“No Internet Connection”</em>, that's normal, so stay connected.</li>
+        <li>In Safari open <strong>192.168.1.1</strong>, then the <strong>OTA</strong> tab.</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">3</span> Firmware first</h2>
+      <ol>
+        <li>Find the card <strong>Update from Files</strong> (called <strong>OTA Update</strong> on some older versions).</li>
+        <li><strong>Update Type:</strong> <span class="kbd">Firmware (application)</span></li>
+        <li><strong>Binary:</strong> choose <code>firmware.bin</code> from Downloads → <strong>Upload</strong>.</li>
+        <li>Wait about a minute while it restarts. If the iPhone drops the controller's Wi‑Fi, join it again and reopen 192.168.1.1.</li>
+        <li>In the <strong>OTA</strong> tab, <strong>Firmware</strong> must now show the new version. If it still says <strong>9.00.0</strong>, stop and see <em>“If it doesn't work”</em> below.</li>
+      </ol>
+      <details>
+        <summary>Why firmware first?</summary>
+        <p class="muted">Some early 9.0.0 builds have a faulty uploader. If a firmware upload fails, nothing changes: the controller simply keeps its old firmware. Doing the firmware first means the next step runs on the fixed uploader.</p>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">4</span> Then the web interface</h2>
+      <ol>
+        <li>Same card. <strong>Update Type:</strong> <span class="kbd">Filesystem (web UI)</span></li>
+        <li><strong>Binary:</strong> choose <code>littlefs.bin</code> → <strong>Upload</strong>.</li>
+        <li>When it says complete, reload the page. Done!</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>Back to the official Forbes firmware</h2>
+      <p style="margin:0 0 8px"><strong>Easiest:</strong> on the controller, <span class="kbd">OTA → Release source → Forbes Automotive (official)</span> → <strong>Check for updates</strong> → <strong>Switch to official</strong>. The phone needs internet for this, so set up <em>Home WiFi (Bridge Mode)</em> on the same OTA tab.</p>
+      <p style="margin:0">No home Wi‑Fi? Download the official files and repeat steps 2–4 with them:</p>
+      <div class="btns">
+        <a class="btn alt forbes-fw" href="https://raw.githubusercontent.com/Forbes-Automotive/OpenHaldex-C6/main/Releases/V9.00.0/firmware.bin">Official firmware.bin</a>
+        <a class="btn alt forbes-fs" href="https://raw.githubusercontent.com/Forbes-Automotive/OpenHaldex-C6/main/Releases/V9.00.0/littlefs.bin">Official littlefs.bin</a>
+      </div>
+      <p class="muted" style="margin:0">Official version: <strong class="latest-forbes">9.00.0</strong>. If you download the same file name twice, iPhone saves the second one as <code>firmware-1.bin</code>, so pick the newest.</p>
+    </section>
+
+    <section class="card">
+      <h2>If it doesn't work</h2>
+      <ul>
+        <li><strong>Still 9.00.0 after step 3:</strong> your controller has one of the early 9.0.0 builds whose uploader can't finish. Nothing was changed. It needs a one-time USB update from a computer (a garage can use the <a href="https://forbes-automotive.com/pages/module-software-updater">official web installer</a>). After that, this page works from your phone. A USB update can reset settings, so export them first.</li>
+        <li><strong>Can't see the controller's Wi‑Fi:</strong> it turns Wi‑Fi off after 5 minutes without CAN traffic. Switch the ignition on.</li>
+        <li><strong>“OTA BLOCKED”:</strong> the car must be stationary with the ignition on.</li>
+      </ul>
+    </section>
+  </div>
+
+  <!-- ============================== ITALIANO ============================== -->
+  <div data-lang-block="it" hidden>
+    <section class="card">
+      <p style="margin:0">Un fork della community del firmware
+        <a href="https://github.com/Forbes-Automotive/OpenHaldex-C6">OpenHaldex-C6 di Forbes Automotive</a>,
+        con correzioni in più. <strong>Non affiliato a Forbes Automotive.</strong>
+        Ti basta l'iPhone. Di solito le impostazioni restano, e puoi tornare al firmware ufficiale quando vuoi.</p>
+      <p class="muted" style="margin:8px 0 0">Ultima versione: <strong class="latest-fork">…</strong></p>
+    </section>
+
+    <section class="card">
+      <h2>Prima di iniziare</h2>
+      <ul>
+        <li>Auto <strong>ferma</strong>, <strong>motore spento</strong>, <strong>quadro acceso</strong>. Il controller blocca gli aggiornamenti se l'auto non è ferma.</li>
+        <li>Se nel controller c'è <span class="kbd">Settings → Backup &amp; Restore</span>, tocca prima <span class="kbd">Export Config</span>. È la tua copia di sicurezza.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">1</span> Scarica i due file</h2>
+      <p class="muted" style="margin:0">Fallo quando hai ancora internet, prima di andare in auto.</p>
+      <div class="btns">
+        <a class="btn" href="https://github.com/louij2/OpenHaldex-C6/releases/latest/download/firmware.bin">Scarica firmware.bin</a>
+        <a class="btn" href="https://github.com/louij2/OpenHaldex-C6/releases/latest/download/littlefs.bin">Scarica littlefs.bin</a>
+      </div>
+      <p class="muted" style="margin:0">Safari chiede <em>«Scaricare?»</em> → tocca <strong>Scarica</strong>. I file finiscono in <span class="kbd">File → Download</span>.</p>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">2</span> Collegati al controller</h2>
+      <ol>
+        <li><span class="kbd">Impostazioni → Wi‑Fi</span> → scegli <strong>OpenHaldex-C6</strong> (o il nome che gli hai dato). Se l'iPhone dice <em>«Nessuna connessione a Internet»</em> è normale: resta collegato.</li>
+        <li>In Safari apri <strong>192.168.1.1</strong>, poi la scheda <strong>OTA</strong>.</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">3</span> Prima il firmware</h2>
+      <ol>
+        <li>Trova il riquadro <strong>Update from Files</strong> (su alcune versioni vecchie si chiama <strong>OTA Update</strong>).</li>
+        <li><strong>Update Type:</strong> <span class="kbd">Firmware (application)</span></li>
+        <li><strong>Binary:</strong> scegli <code>firmware.bin</code> da Download → <strong>Upload</strong>.</li>
+        <li>Aspetta circa un minuto mentre si riavvia. Se l'iPhone perde il Wi‑Fi del controller, ricollegati e riapri 192.168.1.1.</li>
+        <li>Nella scheda <strong>OTA</strong>, alla voce <strong>Firmware</strong> deve comparire la nuova versione. Se c'è ancora <strong>9.00.0</strong>, fermati e leggi <em>«Se qualcosa non va»</em> qui sotto.</li>
+      </ol>
+      <details>
+        <summary>Perché prima il firmware?</summary>
+        <p class="muted">Alcune prime versioni 9.0.0 hanno un difetto nel caricamento. Se il caricamento del firmware fallisce non cambia niente: il controller tiene il firmware vecchio. Facendo prima il firmware, il passo successivo usa il caricamento corretto.</p>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">4</span> Poi l'interfaccia web</h2>
+      <ol>
+        <li>Stesso riquadro. <strong>Update Type:</strong> <span class="kbd">Filesystem (web UI)</span></li>
+        <li><strong>Binary:</strong> scegli <code>littlefs.bin</code> → <strong>Upload</strong>.</li>
+        <li>Quando dice che ha finito, ricarica la pagina. Fatto!</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>Tornare al firmware ufficiale Forbes</h2>
+      <p style="margin:0 0 8px"><strong>Il modo più facile:</strong> nel controller, <span class="kbd">OTA → Release source → Forbes Automotive (official)</span> → <strong>Check for updates</strong> → <strong>Switch to official</strong>. Serve internet sul telefono: configura <em>Home WiFi (Bridge Mode)</em> nella stessa scheda OTA.</p>
+      <p style="margin:0">Niente Wi‑Fi di casa? Scarica i file ufficiali e ripeti i passi 2–4 con questi:</p>
+      <div class="btns">
+        <a class="btn alt forbes-fw" href="https://raw.githubusercontent.com/Forbes-Automotive/OpenHaldex-C6/main/Releases/V9.00.0/firmware.bin">firmware.bin ufficiale</a>
+        <a class="btn alt forbes-fs" href="https://raw.githubusercontent.com/Forbes-Automotive/OpenHaldex-C6/main/Releases/V9.00.0/littlefs.bin">littlefs.bin ufficiale</a>
+      </div>
+      <p class="muted" style="margin:0">Versione ufficiale: <strong class="latest-forbes">9.00.0</strong>. Se scarichi due volte lo stesso file, l'iPhone salva il secondo come <code>firmware-1.bin</code>: scegli il più recente.</p>
+    </section>
+
+    <section class="card">
+      <h2>Se qualcosa non va</h2>
+      <ul>
+        <li><strong>Dopo il passo 3 c'è ancora 9.00.0:</strong> il tuo controller ha una delle prime versioni 9.0.0, che non riesce a finire il caricamento. Non è stato cambiato niente. Serve un aggiornamento via USB da un computer, una volta sola (un'officina può usare il <a href="https://forbes-automotive.com/pages/module-software-updater">programma ufficiale</a>). Dopo, questa pagina funziona dall'iPhone. L'aggiornamento USB può cancellare le impostazioni: esportale prima.</li>
+        <li><strong>Non vedi il Wi‑Fi del controller:</strong> si spegne dopo 5 minuti senza traffico CAN. Accendi il quadro.</li>
+        <li><strong>«OTA BLOCKED»:</strong> l'auto deve essere ferma con il quadro acceso.</li>
+      </ul>
+    </section>
+  </div>
+
+  <footer>
+    <a href="https://github.com/louij2/OpenHaldex-C6">Source on GitHub</a> ·
+    <a href="https://github.com/louij2/OpenHaldex-C6/releases">All releases</a> ·
+    MIT licence. Hardware and most firmware © Forbes Automotive.
+  </footer>
+</main>
+
+<script>
+(function () {
+  // Language: Italian phones get Italian first; the choice is remembered.
+  var blocks = document.querySelectorAll("[data-lang-block]");
+  var buttons = document.querySelectorAll("[data-lang]");
+  var tagline = { en: "louij2 fork · install from your iPhone", it: "fork louij2 · installa dall'iPhone" };
+  function setLang(l) {
+    blocks.forEach(function (b) { b.hidden = b.getAttribute("data-lang-block") !== l; });
+    buttons.forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-lang") === l)); });
+    document.documentElement.lang = l;
+    var t = document.querySelector('[data-i18n="tagline"]'); if (t) t.textContent = tagline[l];
+    try { localStorage.setItem("lang", l); } catch (e) {}
+  }
+  var saved = null; try { saved = localStorage.getItem("lang"); } catch (e) {}
+  setLang(saved || ((navigator.language || "").toLowerCase().indexOf("it") === 0 ? "it" : "en"));
+  buttons.forEach(function (b) { b.addEventListener("click", function () { setLang(b.getAttribute("data-lang")); }); });
+
+  // Versions straight from each repo's release index; the links above work without this.
+  function latest(repo, cb) {
+    fetch("https://raw.githubusercontent.com/" + repo + "/main/Releases/releases.json", { cache: "no-store" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d && d.latest) cb(d.latest); })
+      .catch(function () {});
+  }
+  latest("louij2/OpenHaldex-C6", function (v) {
+    document.querySelectorAll(".latest-fork").forEach(function (e) { e.textContent = v; });
+  });
+  latest("Forbes-Automotive/OpenHaldex-C6", function (v) {
+    document.querySelectorAll(".latest-forbes").forEach(function (e) { e.textContent = v; });
+    var base = "https://raw.githubusercontent.com/Forbes-Automotive/OpenHaldex-C6/main/Releases/V" + v + "/";
+    document.querySelectorAll(".forbes-fw").forEach(function (a) { a.href = base + "firmware.bin"; });
+    document.querySelectorAll(".forbes-fs").forEach(function (a) { a.href = base + "littlefs.bin"; });
+  });
+})();
+</script>
+</body>
+</html>
