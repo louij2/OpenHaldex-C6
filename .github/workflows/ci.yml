@@ -66,6 +66,8 @@ jobs:
 
       - name: Build firmware and filesystem
         run: |
+          # upstream's platformio.ini pins a Windows core_dir (C:/...) for Adam's PC; drop it on Linux
+          sed -i '/^core_dir[[:space:]]*=/d' platformio.ini
           pio run -e esp32c6
           pio run -e esp32c6 -t buildfs
 
