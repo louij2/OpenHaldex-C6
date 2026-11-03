@@ -62,7 +62,7 @@ jobs:
           key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
 
       - name: Install PlatformIO
-        run: pip install --upgrade platformio
+        run: pip install "platformio==6.2.0"  # 6.2.0.post1 reads as < 6.2.0 to pioarduino 55.x and the platform refuses it
 
       - name: Build firmware and filesystem
         run: |
