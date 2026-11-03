@@ -2,7 +2,7 @@
 #include <OpenHaldexC6_defs.h>
 
 // Current firmware version
-#define FW_VERSION "9.14.1" // also bump data/version.json ("fs")
+#define FW_VERSION "9.14.2" // also bump data/version.json ("fs")
 
 // Fork versioning: upstream (Forbes-Automotive) numbers releases X.00.Y - the
 // middle field is always 00. This fork uses the middle field instead (9.10.0,
@@ -338,4 +338,11 @@ V9.14.1 - The car's drivetrain CAN bus never went to sleep with OpenHaldex
           sleep never triggered either. It is now sent only when that setting
           is on, and only while the Haldex side is awake (stops 5 s after it
           goes quiet).
+V9.14.2 - The web UI is stored gzipped: the LittleFS image is built from
+          gzipped copies of data/ (tools/gzip_webui.py) and the web server
+          serves the .gz files directly, so the UI is byte-for-byte the same
+          but takes 256 KB of flash instead of 469 KB and each page load moves
+          about a quarter of the data over Wi-Fi. version.json stays plain.
+          New docs/diagnostics.md covers the bus monitor, sleep log, fault
+          codes, OTA behaviour and the CAN broadcast setting.
 */
