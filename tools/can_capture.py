@@ -9,10 +9,11 @@ needed, and records each step of a test as a labelled phase. `analyze` then
 lists what is on each bus, names every ID it can from the PQ DBC and the
 firmware's own ID list, and flags anything nobody accounts for.
 
-Built to answer "is an aftermarket box on the bus, and which side of the
-controller is it on?" - but it works for any "what changed between A and B" CAN
-question, including what keeps the car's bus awake after locking. For a
-long-running view that needs no analyzer mode, see tools/busmon.py.
+Useful for "is an aftermarket box on the bus, and which side of the controller
+is it on?", for "what keeps the car's bus awake after locking?", and for any
+"what changed between A and B" CAN question. A PQ DBC such as opendbc's
+vw_pq.dbc names the stock IDs; the firmware's own OpenHaldexC6_canID.h is read
+automatically.
 
   python3 tools/can_capture.py --host 10.0.0.73 capture armed   --seconds 30
   python3 tools/can_capture.py --host 10.0.0.73 capture pin     --seconds 30

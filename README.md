@@ -10,28 +10,18 @@
 
 # OpenHaldex — ESP32‑C6 Haldex Controller
 
-> **This is a fork.** Upstream is
-> [Forbes-Automotive/OpenHaldex-C6](https://github.com/Forbes-Automotive/OpenHaldex-C6)
-> and the hardware and most of the firmware are their work (MIT). This fork
-> carries fixes that are open upstream, builds its releases in CI, and points
-> the OTA updater at its own releases. See **[FORK.md](FORK.md)** for what
-> differs, the release process, and how to switch back to upstream builds.
->
-> 📱 **Install from an iPhone, no computer:** <https://louij2.github.io/OpenHaldex-C6/>
-
 <p align="center">
 
-![Version](https://img.shields.io/github/v/release/louij2/OpenHaldex-C6)
-![GitHub stars](https://img.shields.io/github/stars/louij2/OpenHaldex-C6)
-![Last commit](https://img.shields.io/github/last-commit/louij2/OpenHaldex-C6)
+![Version](https://img.shields.io/github/v/release/Forbes-Automotive/OpenHaldex-C6)
+![GitHub stars](https://img.shields.io/github/stars/Forbes-Automotive/OpenHaldex-C6)
+![Last commit](https://img.shields.io/github/last-commit/Forbes-Automotive/OpenHaldex-C6)
 ![Platform](https://img.shields.io/badge/platform-ESP32--C6-blue)
-![Hardware](https://img.shields.io/badge/hardware-Haldex%20Gen1%20%7C%20Gen2%20%7C%20Gen4%20%7C%20Gen5-green)
-[![Download Firmware](https://img.shields.io/badge/Download%20Firmware-Latest%20Release-success?style=for-the-badge)](https://github.com/louij2/OpenHaldex-C6/releases/latest)
+![Hardware](https://img.shields.io/badge/hardware-Haldex%20Gen1%20%7C%20Gen2%20%7C%20Gen3%20%7C%20Gen4%20%7C%20Gen5-green)
+[![Install Firmware](https://img.shields.io/badge/Install%20Firmware-Click%20Here-success?style=for-the-badge)](https://forbes-automotive.com/pages/module-software-updater)
 
 </p>
 
-OpenHaldex is an **open-source Haldex AWD controller** for Volkswagen and Audi Group vehicles using Haldex Generation 1, 2, 4 (PQ chassis, including the GM/SAAB variant) and
-5 differentials — Gen5 covering MQB 0CQ, 0CQ VAQ, and the PQ-based 0AY. The full source and hardware files are published under the permissive **MIT License**, so anyone is free to use, modify, and redistribute them, and it incorporates MIT‑licensed upstream work — see [Licensing](#licensing).
+OpenHaldex is an **open-source Haldex AWD controller** for Volkswagen and Audi Group vehicles using Haldex Generation 1, 2, 4 (PQ Chassis) and 5 (MQB) differentials, with GM, Ford and (new in V10) early **Volvo** and **SAAB** support. The full source and hardware files are published under the permissive **MIT License**, so anyone is free to use, modify, and redistribute them, and it incorporates MIT‑licensed upstream work — see [Licensing](#licensing).
 
 Install is easy with the new harnesses for later PQ & MQB chassis:
 
@@ -56,6 +46,8 @@ It can operate using OEM CAN signals or it is able to run in Standalone mode - w
 - [Overview](#overview)
 - [Hardware](#hardware)
 - [Supported Platforms](#supported-platforms)
+- [Chassis Signals (Non-VW Cars)](#chassis-signals-non-vw-cars)
+- [Volvo & SAAB](#volvo--saab-early-support)
 - [Modes](#modes)
 - [Expert Mode](#expert-mode)
 - [Installation](#installation)
@@ -65,6 +57,7 @@ It can operate using OEM CAN signals or it is able to run in Standalone mode - w
 - [Low Power Mode](#low-power-mode)
 - [Home WiFi (Bridge Mode)](#home-wifi-bridge-mode)
 - [Backup & Restore](#backup--restore)
+- [DashCAN App (Bluetooth)](#dashcan-app-bluetooth)
 - [CAN Sniffing](#can-sniffing-savvycan--gvret)
 - [Live Diagnostics](#live-diagnostics)
 - [Frame Editing](#frame-editing-addingremoving-can-signals)
@@ -84,10 +77,19 @@ It can operate using OEM CAN signals or it is able to run in Standalone mode - w
 - SavvyCAN support via Wi‑Fi or Serial
 - Wi‑Fi access point password protection, with long-press reset
 - Force mode via CAN using hazard lights or TC button
+- Force mode from the car's drive mode select on MQB (Comfort, Sport, Race, Individual ...), each profile set to any mode, with a **Drive Mode** card on Diagnostics (see [Drive Mode Select](#can--force-mode-drive-mode-select-mqb))
 - Adjustable LED brightness
+- Live Data on the dashboard: speed, throttle, RPM, boost, plus engine coolant and oil temperature on the PQ cars (Gen1 / Gen2 / Gen4 / 0AY, from the cluster's Kombi_2 frame), updating up to 10 times a second (**Live Data Refresh** under Display Options)
 - Live diagnostics: UDS (Gen5) and KWP2000‑over‑TP2.0 (Gen2/Gen4) with measurement scaling confirmed against VCDS
 - Selectable CAN frames — enable/disable CAN messages per Generation from the Web UI
+- CAN frame relay to can2gauge gauges over WiFi (ESP-NOW): a gauge with power only, no CAN wire, reads the car as if it were wired (**Relay CAN Frames to Gauges** under Controller Options, off by default)
+- Speed, throttle, RPM, brake and handbrake read from the car on Vauxhall / Opel Insignia, Ford Focus RS and Volvo P3 too, so Expert mode works on them (see [Chassis Signals](#chassis-signals-non-vw-cars))
+- Early Volvo (P2 Gen2 / Gen3, P1 S40 / V50, Gen4, Gen5 SPC) and SAAB 9-3 XWD standalone support, with the CAN bus switched to 250 kbit/s automatically for the pre-facelift P2 (see [Volvo & SAAB](#volvo--saab-early-support))
+- Every generation checked against the Haldex units' own code (V11): the bytes that really set the lock, what the unit reports back, and its own fault bits, in OEM and Standalone
+- The Haldex's own warnings (fault, limp, over-temperature, AWD lamp, temperature sensor, stored fault) on a red **Haldex Warning** card, plus Haldex Data tiles on the dashboard
+- **Follow ABS** (on by default): opens the clutch while the ABS is braking, as the Haldex itself would
 - Wireless (OTA) firmware and web‑UI updates over Wi‑Fi
+- Bluetooth LE link to the DashCAN mobile app: live data, mode and controller on/off, driving settings and Haldex diagnostics from the phone (see [DashCAN App](#dashcan-app-bluetooth))
 - Colour‑coded status indicators throughout the Web UI (green / orange / red — see [Status Indicators](#status-indicators))
 
 ![OpenHaldex-C6](/Images/BoardOverview.png)
@@ -108,9 +110,13 @@ OpenHaldex-C6 sits between your vehicle and the OEM Haldex controller. It can op
 
 This is the original source of Generation 2, 4 (including GM) and 5 logic - any forks or code copied from this project is NOT the work of Forbes Automotive and therefore we cannot support other work unless it is remains part of this project.
 
-**Supported generations:** Gen1, Gen2, Gen4 and Gen5
+**Supported generations:** Gen1, Gen2, Gen3 (Volvo), Gen4 and Gen5.
 
-> Gen3 is currently unsupported.
+> [!NOTE]
+> The Volvo and SAAB generations are new in V10 and standalone only for now. See [Volvo & SAAB](#volvo--saab-early-support).
+
+> [!WARNING]
+> V11 changes the bytes that set the lock on Gen1, Gen2, Gen4, Gen5 0CQ and Gen5 0AY, so the saved learned table is cleared when you update. **Run Learn Haldex again after updating to V11.** Frame-editing masks still on the old defaults move to the new ones by themselves.
 
 ---
 
@@ -139,6 +145,73 @@ These two high‑side drivers for brake/handbrake could be repurposed for other 
 - Generation 5 - MQB (0CQ)
 - Generation 5 - PQ (0AY)
 - Generation 5 - MQB (VAQ)
+- Generation 2 - Volvo P2, pre-facelift (early support)
+- Generation 3 - Volvo P2, facelift (early support)
+- Generation 3 - Volvo P1, S40 / V50 AWD (early support)
+- Generation 4 - Volvo P3 (early support)
+- Generation 4 - SAAB 9-3 XWD (early support)
+- Generation 5 - Volvo SPC 31380867 (early support)
+
+### Chassis Signals (Non-VW Cars)
+
+Expert mode, the speed / throttle limits and brake / handbrake follow need speed, throttle and brake from the car. From V10 these are read on:
+
+| Generation | Speed | Throttle | RPM | Brake | Handbrake |
+|---|---|---|---|---|---|
+| Generation 4 - GM (Vauxhall / Opel) | Yes | Yes | Yes | Yes | Yes |
+| Generation 4 - Ford | Yes | Yes | Yes | Yes | Yes |
+| Generation 4 - Volvo (P3) | Yes | Yes | Yes | Yes | Not yet |
+| Generation 4 - SAAB 9-3 XWD | Yes | Not yet | Yes | Not yet | Yes |
+| Generation 2 - Volvo P2 (Pre-Facelift) | 2002 cars | 2002 cars | 2002 cars | 2002 cars | Not yet |
+| Generation 3 - Volvo P2 (Facelift) | Not yet | Not yet | Not yet | Not yet | Not yet |
+| Generation 3 - Volvo P1 (S40 / V50) | Yes | Yes | Yes | Yes | Yes |
+
+The Insignia, Focus RS, 2002 Volvo P2 and Volvo P1 decodes are checked against real logs from those cars (the P1's speed scale still needs a check against the speedo). The SAAB 9-3 decode comes from a published decode of a real car. The Volvo P3 decode isn't confirmed on a car yet.
+
+> [!NOTE]
+> Volvo moves the P2's CAN IDs between model years, so the pre-facelift P2 decode only covers 2002 cars for now. Logs from other years (and from a facelift P2) are what's needed to add them.
+
+## Volvo & SAAB (Early Support)
+
+New in V10, with the Volvo SPC unit and the P2 facelift Haldex reply decode added in V11, and the Volvo P1 (S40 / V50) in V11.00.1. Pick the car under **Settings → Haldex Generation**:
+
+<p align="center">
+  <img src="/Images/ui-volvo-saab.png" alt="Settings — Haldex Generation set to Volvo P2 (Pre-Facelift), showing the 250 kbit/s CAN bus note" width="300">
+</p>
+
+| Generation | Cars | CAN bus | Haldex reply |
+|---|---|---|---|
+| Generation 2 - Volvo P2 (Pre-Facelift) | S60, V70, XC70, XC90 up to the 2005 facelift | **250 kbit/s**, 29-bit IDs | `0x0120000A` |
+| Generation 3 - Volvo P2 (Facelift) | S60, S60R, V70, XC70, XC90 from the facelift | 500 kbit/s, 29-bit IDs | `0x1020000A` |
+| Generation 3 - Volvo P1 (S40 / V50) | S40 and V50 AWD (T5 / D5), 2004–2012 | 500 kbit/s, 29-bit IDs | `0x1960000A` |
+| Generation 4 - Volvo (P3) | XC60, V70, XC70, S80 (P3), probably Freelander 2 | 500 kbit/s | `0x243` |
+| Generation 4 - SAAB 9-3 XWD | 9-3 XWD | 500 kbit/s | `0x210` |
+| Generation 5 - Volvo (SPC 31380867) | Cars with the Volvo Gen5 SPC unit | 500 kbit/s, 11-bit IDs | `0x126` |
+
+- **Standalone only.** The controller sends the frames the Haldex needs, including Volvo's 100 ms network heartbeat and SAAB's rolling counters. It also puts your lock request into the bytes that carry it. In OEM (inline) mode, frames pass through untouched.
+- **The bus speed follows the generation.** Choosing Volvo P2 (Pre-Facelift), or moving away from it, saves the setting and restarts the controller a couple of seconds later, with both CAN buses at the new speed. Without 250 kbit/s a pre-facelift P2 Haldex never answers, so it shows no Haldex health at all.
+- **Starting values, not finished decodes.** The frame list and lock bytes are a starting point. The meaning of most bytes still needs confirming on real cars, and the Haldex status is shown as raw 0–100 % until logs give its true scaling. SAAB also reports a Haldex temperature.
+- **Decoded from the Haldex's own code (V11).** On the P2 facelift, the reply's byte 6 is the measured clutch value and byte 7 carries the fault / limp and missing-input bits, so the Haldex Warning card works there. The SPC unit's reply gives the clutch torque it's delivering and a fault status. The full-lock value of both still needs a bench check.
+- **Volvo P1 (S40 / V50 AWD, V11.00.1).** Built from logs of a 2005 V50 T5 AWD. The P1 runs the same bus as the P2 facelift but uses none of its CAN IDs, so pick the P1 entry, not a P2 one.
+  - Standalone sends every frame the car puts on its high-speed bus (22 of them), each one listed under Frame Editing. Untick a frame and the **car's own** frame with that ID goes through to the Haldex instead. Untick them all and the Haldex sees the real car; tick them back one at a time on a drive to find any frame it won't accept.
+  - The logs show the P1 module follows engine torque almost one-for-one, goes to full lock on big front wheelspin, and never locks while stopped. The **Volvo P1 Standalone** card (Settings, shown for the P1) sets how your lock request is shown to it:
+    - **Lock Source**: Engine torque (the default, which also raises the pedal), Wheel slip (front wheels faster than the rears), or both together.
+    - **Road Speed** and **Gear**: the rpm sent is the road speed in that gear (1st to 3rd, ratios measured from the V50 logs), so rpm and speed always match a real gear.
+    - **Torque at 100 %** and **Front Wheel Slip at 100 %**, with a Reset to Defaults button.
+    - A live line shows the lock being asked for, what's being sent, and the module's engagement.
+  - Switching DSTC off counts as the TC button, so **Use TC to Force Mode** (Mode Options) can force a mode while DSTC is off. This works in OEM mode, and in Standalone with the car connected.
+  - The mode buttons, Expert and **Learn Haldex** drive it just like the other generations. Learn waits a little longer at each step on the P1, because its engagement trails the torque by up to 0.4 s.
+
+<p align="center">
+  <img src="/Images/ui-volvo-p1.png" alt="Settings — Volvo P1 Standalone card: Lock Source, Road Speed, Gear, Torque at 100 %, Front Wheel Slip at 100 % and the live line" width="300">
+</p>
+
+*Settings → **Volvo P1 Standalone**: here asking for 100 %, sent as 600 torque and full pedal at a steady 30 km/h in 2nd (1980 rpm). The live line is a mock-up: on the car the module hasn't answered our lock request yet (see below).*
+  - **Not working yet (first car test, 25 Oct 2026):** in Standalone the module stays awake but ignores the lock request. The frame bisect and the gear-matched rpm above are the tools for finding out why. Findings: `documents/VOLVO_P1_FINDINGS_2026-10-25.md`.
+  - The Haldex's engagement (`0x1960000A`) is shown as 0–100 %, with full lock at the highest value seen in the logs.
+  - OEM mode passes everything through untouched for now, so Stock and the engagement readout work. Editing the car's frames for 50:50, 60:40 and the other modes comes next; until then Learn needs Standalone on the P1.
+  - The decode and the logs are in `documents/vehicle-logs/gen3/`.
+- **How to help.** Log the car with [SavvyCAN](#can-sniffing-savvycan--gvret), and nudge individual bytes live with the serial lab `OVR <id> <byte> <value>` command (it takes 29-bit Volvo IDs). Logs from a car with the Haldex fitted are what turn these into decoded frames.
 
 ---
 
@@ -158,12 +231,14 @@ The controller provides several preset modes along with a fully customisable 'Ex
 <p align="center">
   <img src="/Images/ui-dashboard.png" alt="Dashboard — mode selection and Haldex engagement gauge" width="300">
   &nbsp;&nbsp;
-  <img src="/Images/ui-live-data.png" alt="Dashboard — live speed, throttle, RPM, boost and per-wheel slip" width="300">
+  <img src="/Images/ui-live-data.png" alt="Dashboard — live speed, throttle, RPM, boost, coolant and oil temperature, and per-wheel slip" width="300">
 </p>
 
 *Dashboard: pick a mode, watch the engagement gauge follow the request (with the last 15 s of actual vs target underneath), and keep an eye on the live data and wheel slip further down the page.*
 
-The **Basic** tab holds the simple guards that apply to every mode — disengage below or above a speed, a minimum throttle before any lock is applied, and how quickly lock is released:
+The **Live Data** card shows speed, throttle, RPM and boost, and on the PQ cars (Gen1, Gen2, Gen4 and 0AY) the engine **Coolant Temp** and **Oil Temp** read from the instrument cluster's Kombi_2 frame; cars that don't send it show `--`. It normally updates twice a second like the rest of the page. **Live Data Refresh** (Display Options, saved in the browser) speeds up just the Live Data tiles, the engagement gauge and the lock graph to 4, 5 or 10 times a second; step back down if the page gets sluggish on a busy phone.
+
+The **Basic** tab holds the simple guards that apply to every mode — disengage below or above a speed, a minimum throttle before any lock is applied, and how quickly lock is released. They cut lock in **every** mode, force triggers included, so when one of them is holding lock at 0% the Haldex Engagement card says which one and what it's set to (e.g. *"Lock is being held at 0% because speed is below "Disengage Under Speed" (20 km/h)"*). Set that limit to 0 to turn the cut-off off:
 
 <p align="center">
   <img src="/Images/ui-basic.png" alt="Basic tab — disengage speeds, minimum throttle and lock release rate" width="300">
@@ -201,16 +276,17 @@ Use the 'Learn Haldex' in the Settings page and within one minute the controller
 
 *Settings: pick the Haldex generation, then run **Learn Haldex**. The card reports whether a learned table is active and carries the Gen5 **Fix Hunting** toggle described below.*
 
-### Long Learn (automated block bisection)
+### Long Learn (which static blocks are needed)
 
-If a normal learn isn't clean (jumps, plateaus, never reaches 100%), **Long Learn** on the Settings page automates the manual "add/remove a frame, learn again" loop, in four phases:
+The **lock-driven** blocks (the frames whose payload follows the lock target, e.g. Motor_11 / Motor_12 / ESP_14 / ESP_19 on Gen5) always have to be edited to have control, so they are always sent. Everything else is a **static** payload. **Long Learn** on the Settings page finds out which of those the Haldex actually needs:
 
-1. **Initial Sweep** — every editable frame block for the selected generation is switched **on** and one learn is run at the **Launch PWM Floor** currently configured. The floor governs the *ramp* (how fast the clutch takes up and releases lock), not how far it can ultimately go, so it isn't hunted through candidate values here — this step just establishes the baseline shape and whether 100% is already reachable as configured.
-2. **BPK Adjust** *(Gen5 only, only runs if step 1 didn't reach 100%)* — if the floor alone can't get to 100%, the torque ceiling itself (**Lock Calibration**, `bpkCeilingNm`) is what's capping it. This step forces **Fix Hunting** on for the rest of the run (the default packing has no ceiling concept at all and would otherwise let the sweep silently ignore whatever ceiling is set) and walks the ceiling up in fixed steps, using quick single-point checks at full lock rather than a full sweep, until 100% is reached or the ceiling hits its safe maximum. Fix Hunting itself is **always reverted** to whatever it was before at the end of the run, win or lose — only the calibrated ceiling *value* is kept, so it needs turning on by hand afterward to actually take effect.
-3. **Sweeping Blocks** — with the calibrated floor/ceiling locked in, each *additional* block (anything outside the generation's default set) is removed one at a time and checked with a quick **release-to-0-then-back-to-100%** cycle (not a full 101-step re-sweep, but a real cycle rather than a frozen hold — holding steady at 100% and just flipping the mask bit turned out to be unreliable, since the controller doesn't cleanly re-evaluate a step change while already sitting at max). Any block whose removal *affects* the result goes back on — **needed** if it got worse (including feedback dropping to nothing — that's the strongest possible "needed" signal, not a failure), flagged **affects (better without)** if it improved; one that makes no difference is **not needed** and stays off. Tick *Also test the default (core) blocks* to bisect everything.
-4. **Confirmation** — a full sweep is stored against the final block set (this is the one place a full 0–100% sweep still matters, since the stored table is used to interpolate every lock target, not just 100%).
+1. **Reference** — every block for the generation is switched **on** (as standalone sends the bus) and a full 0–100% sweep is run on the unit's own settings.
+2. **BPK Adjust** *(Gen5 only, only if that sweep hunts — not smooth — or falls short)* — **Fix Hunting** (BPK packing) is switched on and kept only if a full sweep is genuinely better; if it is still short on level, the torque ceiling (**Lock Calibration**, `bpkCeilingNm`) is walked up to the lowest value that reaches 100%. Whatever wins is **kept** when the run completes.
+3. **Prove it** — the all-on sweep on the settled settings must be smooth (it is re-swept if BPK moved the ceiling). Then two quick reads at **20 / 40 / 70 / 100%** with everything on: their average is the reference, and their spread is the **noise** floor every block is judged against (minimum 4%). If all-on is not a smooth 100%, or the two reads differ by more than 10% at any point, the run stops — there is nothing trustworthy to compare blocks with.
+4. **Testing blocks** — each static block is switched off **on its own** (everything else on), read at the same four points (releasing to 0% before each one, since a held lock doesn't re-evaluate cleanly), and switched back on. A change beyond the noise floor at any point = **needed** (or **affects (higher without)** if it read higher — still kept on). No change = **no effect**. Spreading the points over the ramp means a block that only matters at part lock isn't missed on a clean 100%. Tick *Also test the lock-driven (core) blocks* to test those too.
+5. **Confirmation** — every "no effect" block off together, full sweep compared CF-by-CF with the step-3 curve. If it still matches, that becomes the final set and stored learn table. If not (a step between the two test points, or two frames covering for each other) every block is left on, the reference table is stored and the run is flagged as an **interaction**.
 
-Expect 10–20 minutes with the car running and Haldex CAN active. The tracker shows the current phase, sweep count, the block under test, the current floor and torque ceiling, the reference score and the live Sent/Returned bars. Cancelling (or losing Haldex data during the Initial Sweep or Confirmation phases) restores the blocks, floor, torque ceiling, Fix Hunting toggle and learn table that were in place before the run.
+On the bench (standalone) "off" means the frame is not sent at all; in the car (normal mode) it means the car's own frame passes through untouched. A full sweep takes about a minute and a four-point block read 6–12 seconds, so a Gen5 run is roughly 6–8 minutes. The tracker shows the phase, sweep count, the block under test, Fix Hunting / torque ceiling, the reference score with its noise and threshold, and the live Sent/Returned bars; each tested block shows its worst deviation. Cancelling, or a failed proof, restores the blocks, floor, torque ceiling, Fix Hunting toggle and learn table that were in place before the run.
 
 Below the tracker, a **Chassis / car notes** box (saved on the unit) and **Export report (.txt)** produce a plain-text record of the car, calibration values, the recommended block set (as a checklist plus the raw mask), the full sweep log and the stored learn table — handy for sharing a known-good layout for a given chassis.
 
@@ -256,10 +332,40 @@ Two optional force mode triggers are available via. CAN signals already present 
 Both are optional and can be enabled in the Settings page. They allow mode changes from OEM controls without any additional wiring.
 
 <p align="center">
-  <img src="/Images/ui-mode-options.png" alt="Settings — Mode Options (TC / hazard / external button force modes and their priority) and Output Options (brake and handbrake follow)" width="300">
+  <img src="/Images/ui-mode-options.png" alt="Settings — Mode Options (TC / hazard / external button / drive mode force modes and their priority) and Output Options (brake and handbrake follow)" width="300">
 </p>
 
-*Settings → **Mode Options**: each force-mode trigger has its own target mode, the external button can either advance or hold-to-force, and a priority order settles what happens when several triggers are active at once. **Output Options** underneath sets whether the brake and handbrake outputs follow (or invert) the inputs.*
+*Settings → **Mode Options**: each force-mode trigger has its own target mode, the external button can either advance or hold-to-force, the drive mode select has a mode per profile, and a priority order settles what happens when several triggers are active at once. **Output Options** underneath sets whether the Haldex follows the brake and handbrake (from the car's CAN or a switch wired to the input pin), and **Follow ABS** (on by default) opens the clutch while the ABS is braking. With Follow Handbrake on, pulling the handbrake also opens the clutch. The Invert options only flip the input wire, never the car's own CAN bit.*
+
+### CAN — Force Mode (Drive Mode Select, MQB)
+
+On MQB cars (Gen5 `0CQ`, Gen5 `0AY` on MQB and the VAQ), the car's own drive mode select can force a mode. Turn on **Use Drive Mode to Force Mode** under Settings → **Mode Options** and pick a mode for each drive profile. **N/A** leaves the mode alone. The defaults are:
+
+| Drive profile | OpenHaldex mode |
+|---|---|
+| Comfort | Stock |
+| Sport | 60:40 |
+| Race | 50:50 |
+| Individual | Expert |
+| Normal, Offroad, Eco, Snow and the rest | N/A |
+
+How it works:
+
+- The gateway sends the selected profile once a second in **Charisma_07** (`0x3E8`, byte 1 bits 0–3). If a car doesn't send that frame on the Haldex's bus, the engine's requested mode in **Charisma_01** (`0x385`, byte 2) is used instead. That one can't tell Individual apart: it shows the engine setting chosen inside Individual.
+- The TC button, hazards and external button still win over it. If no Charisma frame arrives for 3 seconds, the drive mode stops forcing anything.
+- The header banner shows a drive mode force the same way as the others, e.g. `Expert (Sport>60:40)`.
+- **Diagnostics → Drive Mode** shows the profile the car is in, which frame it was read from, the mode the car's gateway asks the Haldex and VAQ for, what the Haldex reports back (mode and status), and what is being forced.
+
+Profile and mode numbers come from the MQB K-matrix and the [jilleb/MQB-FPA](https://github.com/jilleb/MQB-FPA) research into the gateway's drive profile data. Our own MQB logs read Individual (7) from Charisma_07.
+
+> [!NOTE]
+> Reading the drive profile has been checked against our own MQB logs. Forcing modes from it has not been driven on a car yet.
+
+<p align="center">
+  <img src="/Images/ui-drive-mode.png" alt="Diagnostics — Drive Mode card: drive profile Sport read from Charisma_07, the car asking the Haldex for Normal, the Haldex reporting Normal / Available, forcing 60:40" width="300">
+</p>
+
+*Diagnostics → **Drive Mode**: the car is in Sport (read from Charisma_07), its gateway asks the Haldex for Normal, the Haldex reports Normal / Available, and Sport is forcing 60:40.*
 
 ---
 
@@ -356,7 +462,7 @@ If the Wi‑Fi interface becomes unresponsive:
 
 - Long‑press the `Mode` button to clear the WiFi password and restart the AP to an open state.
 
-> The Web UI is built on Forbes Automotive's shared dark theme (the same look used across the Can2Cluster, SpeedPulser, SpeedPulserPro, can2rpm, MQB Steering Wheel Controller and AirLift Controller firmware), so the interface and status conventions stay consistent across the whole product line. Current firmware version: **9.00.0** (shown in the UI footer and at `/ota/info`).
+> The Web UI is built on Forbes Automotive's shared dark theme (the same look used across the Can2Cluster, SpeedPulser, SpeedPulserPro, can2rpm, MQB Steering Wheel Controller and AirLift Controller firmware), so the interface and status conventions stay consistent across the whole product line. Current firmware version: **11.00.4** (unreleased: coolant and oil temperature on the Live Data card, faster Live Data refresh; 11.00.3 beta: bus sleep and OTA fixes, Volvo P1 frame bisect and gear-matched rpm, web UI stored gzipped), shown in the UI footer and at `/ota/info`.
 
 ---
 
@@ -373,11 +479,11 @@ There are three layers of power saving. Each layer builds on the previous one an
 
 ---
 
-### Layer 1 — Idle AP Shutdown *(always active, no setup needed)*
+### Layer 1 — Idle AP Shutdown *(on with CAN Sleep, which is on by default)*
 
-After **5 minutes** with no WiFi clients connected and no CAN activity, the controller automatically shuts down the WiFi AP and turns off the LED. This runs regardless of any other Low Power settings.
+After **5 minutes** with no WiFi clients and the bus below the wake threshold, the controller shuts down the WiFi AP, Bluetooth and the LED. Turning **CAN Sleep** off keeps them up permanently.
 
-As soon as CAN traffic resumes — typically the instant the car wakes up — WiFi is restored automatically. No user action required.
+When the frame rate rises above the threshold again (car unlocked or started), WiFi comes back on its own.
 
 ---
 
@@ -388,6 +494,8 @@ Enable the **CAN Sleep** toggle in Settings. When active:
 - The ESP32-C6 CPU enters **light sleep** whenever FreeRTOS is idle, cutting CPU power consumption significantly.
 - The TWAI (CAN) peripheral powers down during sleep but **preserves its registers and receive queue** across cycles, so no messages are lost on wake-up.
 - The CAN transceiver chips remain powered and continue listening on the bus, so the first incoming frame wakes the controller instantly.
+
+Light sleep and the CPU clock floor are set at boot, so toggling CAN Sleep takes full effect after a restart.
 
 This mode gives the majority of power savings for most installs and is the recommended starting point.
 
@@ -408,18 +516,31 @@ Use Aggressive mode when the car sits unused for days at a time and you want the
 
 ### How to set it up
 
-Low Power Mode requires **one short calibration step** the first time, because every car idles its CAN bus at a slightly different rate.
+Every car idles its CAN bus at a different rate, so the wake threshold has to sit just above your car's parked rate.
+
+**Gen5: automatic**
+
+Selecting a Gen5 generation asks *Enable CAN sleep and set it up automatically?* (and asks again whenever you switch back to Gen5). Say yes, then just use the car. The next time it is left with no phone connected, the controller:
+
+1. switches on CAN Sleep and CAN Sleep (Aggressive),
+2. waits until the car is parked: speed 0, engine off and ignition off (`ZAS_Kl_15` in Klemmen_Status_01, `0x3C0`),
+3. averages the chassis frame rate for **15 minutes**, restarting if a phone connects, the ignition comes on or the car moves,
+4. sets **LP Wake Threshold** to that average **+ 300 fps** and saves it.
+
+It runs once. Sleep stays off until it has finished, so the controller never sleeps on a wrong threshold. The Controller Options card shows *armed* or the measured average.
+
+**Manual (any generation)**
 
 **Step 1 — Measure your Sleeping CAN rate**
 
 1. Park and lock the car. Wait 15 minutes or until the Chassis bus goes fully quiet.
 2. Stay connected to the OpenHaldex WiFi AP — the controller will remain awake while a client is connected.
 3. Open the Web UI → **Settings** and watch the **Chassis fps** and **Haldex fps** counters.
-4. Note the highest reading you see while the car is asleep. Most cars show **800 fps**; some show a handful of fps from a periodic gateway heartbeat.
+4. Note the highest reading you see while the car is asleep. Some cars go fully quiet; others keep a gateway heartbeat of several hundred fps.
 
 **Step 2 — Set the wake threshold**
 
-5. Set the **LP Wake Threshold (fps)** slider to a value slightly **above** the parked-bus reading — e.g. if the bus is quiet at 0 fps, set the slider to **5**; if it idles at 8 fps, set the slider to **15**.
+5. Set the **LP Wake Threshold (fps)** slider a few hundred above the parked reading, e.g. parked at 800 fps → **1100** (the default).
 
 **Step 3 — Enable Sleep and Disconnect**
 
@@ -432,10 +553,10 @@ The controller will now sleep, drawing ~14 mA, and **wake automatically whenever
   <img src="/Images/ui-controller-options.png" alt="Settings — Controller Options card: CAN Sleep, CAN Sleep (Aggressive), Bench Mode, LP Wake Threshold with the live Chassis / Haldex frame rate, plus Broadcast over CAN, SavvyCAN and Live Diagnostics toggles" width="300">
 </p>
 
-*Settings → **Controller Options**: everything in this section lives on one card — the two CAN Sleep toggles, Bench Mode, the **LP Wake Threshold** slider with the live **Chassis / Haldex fps** readout beneath it — alongside Broadcast over CAN, the SavvyCAN outputs, Live Diagnostics and LED brightness.*
+*Settings → **Controller Options**: the two CAN Sleep toggles, Bench Mode, the **LP Wake Threshold** slider (here set by the Gen5 auto-setup) and the live **Chassis / Haldex fps** readout, alongside Broadcast over CAN, the SavvyCAN outputs, Live Diagnostics and LED brightness.*
 
 > [!NOTE]
-> **Standalone mode:** with no chassis bus, the Haldex ECU itself sleeps fully, so any Haldex-bus CAN traffic wakes the module regardless of the slider value.
+> **Standalone mode:** with no chassis bus, the Haldex ECU itself sleeps fully, so the slider is ignored: the module wakes at a fixed 50 fps of Haldex-bus traffic.
 
 > [!NOTE]
 > **Switched-ignition installs:** if the module is already powered off with the ignition, Low Power Mode saves little and is optional.  
@@ -486,6 +607,37 @@ python tools/openhaldex_config.py import backup.json --tune-only
 ```
 
 Contributed in [PR #39](https://github.com/Forbes-Automotive/OpenHaldex-C6/pull/39) by louij2, along with Bench Mode and bridge mode.
+
+---
+
+## DashCAN App (Bluetooth)
+
+The controller also talks **Bluetooth LE** to the **DashCAN** mobile app, so the basics are on the phone without joining the **OpenHaldex‑C6** WiFi — and the app can stay connected to a DashCAN interface at the same time. The web UI remains the place for everything else (Expert maps, learning, generation setup, frame editing, OTA).
+
+**From the app:**
+
+- **Live** — mode buttons, controller on/off, lock target / actual, speed, throttle, rpm, boost, steering angle, CAN health and Haldex warnings (temperature protection, coupling open, speed limit).
+- **Settings** — the settings you change per situation: force modes (TC off / hazard lights / external button → mode), release lock on brake / handbrake, no‑lock speed and throttle window, steering‑angle lock scaling, gradual lock release and its rate, live diagnostics, LED brightness. Changes made on the web UI show up in the app and the other way round.
+- **Haldex diagnostics** — clutch / oil / module temperatures, supply voltage, clutch current and duty (and oil pressure / estimated torque on Gen4), from the same [Live Diagnostics](#live-diagnostics) pollers. Needs *Live diagnostics* switched on.
+- **Gauges** — `AWD Lock`, `AWD Lock Target`, `Steering` and the Haldex temperatures can be placed on the app's dashboards and in drive recordings.
+
+**Connecting.** With Bluetooth enabled (default), the app finds the controller as `OpenHaldex‑XXXX` and connects to the first one in range by itself; it can also be picked on the app's Bluetooth screen. Live data needs no pairing. The first change from a phone pairs it once:
+
+- the **first phone** pairs without a code (the phone at most asks you to confirm);
+- after that, **every new phone needs the 6‑digit pairing code**. It is shown in the app on an already paired phone and on the web UI (**Diagnostics → Bluetooth**).
+
+**On the controller:** **Diagnostics → Bluetooth (DashCAN App)** has the enable switch, a *phone connected* indicator, the pairing code and **Forget Paired Phones** — this removes every paired phone, makes a new code, and lets the next phone pair without one again (also forget the device in the phone's Bluetooth settings). Bluetooth follows the WiFi into [Low Power Mode](#low-power-mode): it switches off when the car is parked and comes back with it.
+
+<p align="center">
+  <img src="/Images/ui-bluetooth.png" alt="Diagnostics — Bluetooth (DashCAN App) card: Enable Bluetooth on, phone connected, pairing code for another phone, Forget Paired Phones" width="300">
+</p>
+
+*Diagnostics → **Bluetooth (DashCAN App)** with a phone connected: the pairing code shown is the one a second phone needs.*
+
+> [!NOTE]
+> Until the first phone has paired — on a new controller, or right after Forget Paired Phones — anyone within Bluetooth range could be that first phone. Pair yours straight away; if a phone you don't know got there first, use Forget Paired Phones. Firmware updates are never done over Bluetooth.
+
+The protocol is documented in [`documents/MOBILE_APP_OPENHALDEX.md`](documents/MOBILE_APP_OPENHALDEX.md), so other apps can use it too. Endpoints: `POST /api/ble/forget`; `bleEnabled`, `blePasskey`, `bleCodeRequired` in `/api/settings`; `bleConnected`, `bleCodeRequired` in `/api/dashboard`.
 
 ---
 
@@ -635,7 +787,7 @@ This is the recommended method for most users.
 Once a controller is already running firmware **8.00.0 or later**, it can also be updated wirelessly over its own Wi‑Fi AP instead of by USB. This is a **two‑step process**, because the filesystem (web UI) and the firmware (application code) live on separate flash partitions and are updated independently:
 
 1. **Step 1 — Filesystem update** (`POST /ota/update/fs`, uploads `littlefs.bin`)  
-   Updates `index.html`, `app.js`, `style.css` and other web assets. The device does **not** reboot after this step — it's meant to be followed immediately by Step 2.
+   Updates `index.html`, `app.js`, `style.css` and other web assets. From 11.00.3 these are stored gzipped in `littlefs.bin` (packed at build time by `tools/gzip_webui.py`), so the image is smaller and the pages load faster; the browser unpacks them, nothing changes on screen. The device does **not** reboot after this step — it's meant to be followed immediately by Step 2.
 2. **Step 2 — Firmware update** (`POST /ota/update`, uploads `firmware.bin`)  
    Updates the application itself. The device reboots automatically once the upload finishes.
 
@@ -655,8 +807,8 @@ The **OTA** tab has three ways in, all ending in the same guided sequence (files
 **Option 1 — straight from GitHub.** The browser needs internet *while it can still reach the controller*. The reliable way to get that is [bridge mode](#home-wifi-bridge-mode): join the controller to your home/garage router (the **Home WiFi** card is repeated on the OTA tab for this), put the phone on the same network, and open the address the card shows. The phone keeps its normal internet and the controller is one hop away. On the bare **OpenHaldex‑C6** AP most phones drop mobile data, so that route is best‑effort.
 
 1. Press **Check for updates**. The page first pings the controller — if it can't be reached you get a **Retry** and told why (wrong network, or the controller has gone to sleep). Then it fetches the release list. With no internet it reads the controller's bridge status and says exactly what to do next: join the network the controller is already on (address included), fix a configured‑but‑dropped link, or **Set up Home WiFi** (jumps to the card).
-2. Pick a version. Newer stable releases are listed by default; tick **Show beta / older versions** to roll back. Rollback is allowed — the confirm warns that older releases may not have this page, so coming forward again could mean USB.
-3. **Install**. Each image is downloaded with a progress bar, uploaded with its published SHA‑256 (the device refuses a mismatch), the filesystem is verified, then the firmware goes in and the page waits for the reboot.
+2. Pick a version. Newer stable releases are listed by default; tick **Show beta / older versions** to roll back. Rollback is allowed — the confirm warns that older releases may not have this page, so coming forward again could mean USB. Releases whose images don't fit this controller's flash layout (9.00.0 and older, from before the Bluetooth layout change) aren't listed, because they can only go on over USB.
+3. **Install**. Each image is downloaded with a progress bar and uploaded, the filesystem is verified, then the firmware goes in and the page waits for the reboot.
 
 Where the list comes from: [`Releases/releases.json`](Releases/releases.json) (notes, date, channel, `ota` flag, size and SHA‑256 per image — written by `tools/make_release.py`, which rescans every `Releases/V*/` folder; run it with `--reindex` after dropping a folder in by hand) merged with the `V*` folder listing from the GitHub API. A folder that isn't in the index yet still shows up, tagged *unverified* (no checksum, no notes); a folder deleted from GitHub disappears even if the index still lists it. `raw.githubusercontent.com` is tried first, then the jsDelivr mirror of the same repo.
 
@@ -675,6 +827,9 @@ Keep the page open and the screen on during an install. While a browser is on th
 > [!NOTE]
 > USB via ESP Web‑Tools (above) remains the recommended method for a controller's **first** flash or for recovering from a failed update; OTA is for updating a controller that's already running.
 
+> [!IMPORTANT]
+> The first release with [Bluetooth](#dashcan-app-bluetooth) changes the flash layout (bigger firmware slots, smaller web‑UI partition). A partition table can't be changed over the air, so that release is installed **once over USB** with ESP Web Tools; settings are kept. It is not offered by the OTA page on older firmware. Later updates work over OTA again.
+
 ---
 
 ## Status Indicators
@@ -687,7 +842,17 @@ Throughout the Web UI — Diagnostics, CAN health, force‑mode sources, and sim
 | 🔴 Red | Unhealthy / Off / Inactive — the signal is present but reporting a bad or inactive state |
 | 🟠 Orange | Unavailable — no value has been received for this field (e.g. not applicable to the selected Haldex generation, or data hasn't arrived yet) |
 
-This applies to items such as Chassis/Haldex CAN health, steering health, ASR/TC status, hazard and brake/handbrake inputs, and the OTA safety banner (`SAFE` in green / `NOT SAFE` in red).
+This applies to items such as Chassis/Haldex CAN health, steering health, ASR/TC status, hazard and brake/handbrake inputs, and the OTA safety banner (`SAFE` in green / `NOT SAFE` in red). On MQB, the **Drive Mode** card underneath CAN Information shows the car's drive mode select (see [Drive Mode Select](#can--force-mode-drive-mode-select-mqb)).
+
+On the dashboard, the **Haldex State** legend decodes the state byte for the selected generation: PQ fault flags on Gen1 / 2 / 4, and on Gen5 / VAQ the drive mode the unit is running plus its status (Starting Up / Available / Not Available / Out of Step).
+
+From V11 each generation's own health bits are decoded as the unit's code really sets them. When the Haldex reports a fault, limp, over-temperature, AWD lamp, a temperature-sensor fault or a stored fault, a red **Haldex Warning** card appears at the top of the dashboard naming it, and the Haldex Data card shows each one as a tile next to the Haldex temperature. Diagnostics also shows **ABS Braking (CAN)**.
+
+<p align="center">
+  <img src="/Images/ui-haldex-warning.png" alt="Dashboard — red Haldex Warning card (over-temperature protection) above the Haldex Data card with the health tiles" width="300">
+</p>
+
+*Dashboard: the Haldex has pulled the clutch back to cool down, so the red Haldex Warning card names it, with the temperature and each health bit on the Haldex Data card underneath.*
 
 <p align="center">
   <img src="/Images/ui-diagnostics.png" alt="Diagnostics tab — CAN status pills, CAN information (mode, force-mode sources, steering, ASR/TC, hazards), brake / handbrake signals and system info" width="300">
@@ -736,6 +901,8 @@ Port: 23
 500000
 ```
 
+(`250000` when Generation 2 - Volvo P2 (Pre-Facelift) is selected.)
+
 ### Serial Connection
 
 SavvyCAN can also connect directly over USB without needing Wi‑Fi:
@@ -744,6 +911,19 @@ SavvyCAN can also connect directly over USB without needing Wi‑Fi:
 2. In Settings, enable SavvyCAN via Serial
 3. In SavvyCAN, add a new device connection → **Serial Connection (GVRET)**
 4. Select the correct COM port and set the speed to **500000**
+
+### Recording From a Laptop (no SavvyCAN)
+
+[`tools/can_capture.py`](tools/can_capture.py) (contributed by Luca C) turns analyzer mode on, records each step of a test as a named phase over the same WiFi GVRET link, then turns analyzer mode off again. `analyze` lists every ID on each side (car / Haldex), names what it can from a DBC and the firmware's own ID list, flags anything unknown, and shows what appears, disappears or changes between phases:
+
+```
+python tools/can_capture.py --host 192.168.1.1 capture armed --seconds 30
+python tools/can_capture.py --host 192.168.1.1 capture locked --seconds 30
+python tools/can_capture.py analyze --dbc vw_pq.dbc
+```
+
+> [!WARNING]
+> While analyzer mode is on, frames are passed through untouched and the Haldex runs stock. If a capture is interrupted, run `python tools/can_capture.py --host 192.168.1.1 off`.
 
 ---
 
@@ -832,6 +1012,7 @@ Pinout and functionality remain consistent across supported enclosure versions.
 - **A Banging Donk** — [Original OpenHaldex project](https://github.com/ABangingDonk/OpenHaldexT4) for Gen1 vehicles
 - **Chris (meatro) — OpenHaldex‑S3** — [OpenHaldex‑S3](https://github.com/meatro/OpenHaldex-S3) (MIT). Portions of the map editor / Expert Mode, CAN View, web UI, PlatformIO structure and API control derive from this project
 - **RktBox (Kile Thomson) — OpenHaldex‑Edge** — [OpenHaldex‑Edge](https://github.com/Kile-Thomson/OpenHaldex-Edge). The geometry‑compensated per‑corner slip calculation (Ackermann wheel‑radius model) and the ESP_14 **Launch PWM Floor** (`BR_Vorg_*_Min` raise) were adopted from this project
+- **jilleb — MQB-FPA** — [MQB-FPA](https://github.com/jilleb/MQB-FPA). The MQB drive profile and drive mode numbers behind [Drive Mode Select](#can--force-mode-drive-mode-select-mqb) (Comfort / Normal / Sport / Offroad / Eco / Race / Individual / Snow) come from this project's reverse engineering of the gateway's drive profile (FPA) data
 - **Arwid Vasilev** — PCB redesign (V1.02)
 - **LVT Technologies** — OTA update integration (now deprecated, but still appreciated)
 

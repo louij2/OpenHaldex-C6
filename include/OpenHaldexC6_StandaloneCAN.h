@@ -2,17 +2,8 @@
 
 #include <OpenHaldexC6_defs.h>
 
-// Periodic frame tasks (dispatcher tasks per generation)
-void frames10(void *arg);
-void frames13(void *arg);
-void frames20(void *arg);
-void frames25(void *arg);
-void frames50(void *arg);
-void frames100(void *arg);
-void frames200(void *arg);
-void frames250(void *arg);
-void frames1000(void *arg);
-void gen41DualBusRatesTask(void *arg);
+// Periodic frame task: one scheduler for every standalone rate and generation
+void standaloneFramesTask(void *arg);
 
 // Gen1 standalone frames
 void Gen1_frames10();
@@ -66,7 +57,7 @@ void Gen5_0CQ_VAQ_frames100();
 void Gen5_0CQ_VAQ_frames200();
 void Gen5_0CQ_VAQ_frames1000();
 
-// Gen5 (0AY) standalone frames - 0AY controller (starter copy of Gen4 standalone)
+// Gen5 (0AY) standalone frames - 0AY is a PQ unit (PQ frame set, Bremse_4 lever, Allrad_1 0x2C0 feedback)
 void Gen5_0AY_frames10();
 void Gen5_0AY_frames20();
 void Gen5_0AY_frames25();
@@ -80,3 +71,35 @@ void Gen42_frames20();
 void Gen42_frames100();
 void Gen42_frames200();
 void Gen42_frames1000();
+
+// Volvo P2 Gen2 (pre-facelift, 250 kbit/s) standalone frames
+void VolvoP2Gen2_frames10();
+void VolvoP2Gen2_frames20();
+void VolvoP2Gen2_frames100();
+
+// Volvo P2 Gen3 (facelift) standalone frames
+void VolvoP2Gen3_frames10();
+void VolvoP2Gen3_frames100();
+
+// Volvo Gen4 (P3 family) standalone frames
+void VolvoGen4_frames10();
+void VolvoGen4_frames20();
+void VolvoGen4_frames100();
+
+// Volvo Gen5 "SPC" 31380867 (generation 53, V11.00.0) standalone frames
+void VolvoSpc_frames10();
+void VolvoSpc_frames20();
+void VolvoSpc_frames100();
+
+// Volvo P1 S40 / V50 AWD (generation 31, V11.00.1) standalone frames
+void VolvoP1_frames10();
+void VolvoP1_frames13();
+void VolvoP1_frames20();
+void VolvoP1_frames25();
+void VolvoP1_frames50();
+
+// SAAB 9-3 XWD standalone frames
+void Saab93_frames10();
+void Saab93_frames20();
+void Saab93_frames100();
+void Saab93_frames1000();

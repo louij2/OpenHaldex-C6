@@ -55,11 +55,16 @@ jobs:
           key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
 
       - name: Install PlatformIO
-        run: pip install --upgrade platformio
+        run: pip install "platformio==6.2.0"  # 6.2.0.post1 reads as < 6.2.0 to pioarduino 55.x and the platform refuses it
 
       - name: Build
         run: |
-          pio run -e esp32c6
+          # upstream's platformio.ini pins a Windows core_dir (C:/...) for Adam's PC; drop it on Linux
+          sed -i '/^core_dir[[:space:]]*=/d' platformio.ini
+          # custom_sdkconfig: the first run rebuilds Espressif's libraries, then its nested
+          # second stage trips over the platform's bundled core (6.2.0-post.1 < 6.2.0) after
+          # the libraries are saved. A second run builds the app on those libraries.
+          pio run -e esp32c6 || pio run -e esp32c6
           pio run -e esp32c6 -t buildfs
 
       # No --notes: make_release.py takes them from this version's changelog

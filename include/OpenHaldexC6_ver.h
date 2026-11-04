@@ -2,13 +2,7 @@
 #include <OpenHaldexC6_defs.h>
 
 // Current firmware version
-#define FW_VERSION "9.14.2" // also bump data/version.json ("fs")
-
-// Fork versioning: upstream (Forbes-Automotive) numbers releases X.00.Y - the
-// middle field is always 00. This fork uses the middle field instead (9.10.0,
-// 9.11.0 for features; 9.10.1 for fixes), so our versions sort above the
-// upstream release they branched from and can never collide with one of theirs.
-// Digits and dots only: the updater's folder regex rejects any suffix.
+#define FW_VERSION "11.10.0" // also bump data/version.json ("fs")
 
 /*
 Version Control:
@@ -174,81 +168,447 @@ V9.00.0 - shared Forbes Automotive UI theme; automatic product web-asset
           revalidation, 304 when unchanged) instead of max-age=1y + a hand-
           bumped ?v= that kept being forgotten - phones were running a stale
           app.js against new HTML, so buttons on new cards did nothing.
+        - fixed saving the Haldex generation (dropdown or backup restore)
+          overwriting the saved drive mode with the generation number
+          (lastMode = generation) - Gen1/41/5x then booted in FWD.
 
---- fork point: everything below is this fork, not upstream -----------------
+V9.00.5 - 9.00.4 (VAQ + Themes + ESP-NOW) merged with the GitHub contributor PRs:
+        - #39 WiFi bridge mode / config backup tool (already ported in 9.00.4)
+        - #40 CLI: accept the old _fw_version backup key (not needed by our tool)
+        - #43 OTA tab: Stable / Latest build update channel (web UI only)
+        - #44 Bluetooth LE for the DashCAN app (NimBLE) + lock release
+          switch/rate now actually save. PARTITION CHANGE: app slots
+          0x1A0000 -> 0x1C0000, LittleFS 0xB0000 -> 0x70000 (at 0x390000).
+          Needs ONE USB flash from any older build - cannot go over OTA.
+        - #42 Vehicle Geometry card (wheelbase / tracks / steering ratio)
+          for the per-corner slip calc, persisted, in backups. Defaults TT Mk3.
+        - #41 favicons, PWA manifest, home-screen icons. The six iOS splash
+          screens were left out: with them the UI (~145 blocks) no longer
+          fits the 0x70000 LittleFS (112 blocks) that #44 introduced.
+        - ESP-NOW and BLE now run side by side on the one radio - untested
+          together on hardware.
 
-V9.10.0 - first release of the louij2 fork (MIT, upstream remains
-          Forbes-Automotive/OpenHaldex-C6). Versioning moves to the middle
-          field so our releases sort above the upstream cut they branched from
-          and cannot collide with theirs.
-        - OTA updater now points at this repo, so devices running this firmware
-          are offered this fork's releases.
-        - tools/make_release.py added: builds Releases/releases.json from the
-          actual binaries, with `verify` (CI-enforced) and `reindex`
-          subcommands. Upstream had no committed release tooling, and its index
-          had drifted from the files - V9.00.0's firmware was re-uploaded on
-          2026-09-30 after the index was written on 2026-09-20 (+8576 bytes),
-          and V8.00.3's entry was back-filled 192 bytes short. Both are
-          corrected here, and `verify` now fails the build if the index and the
-          binaries ever disagree again. Note upstream removed the OTA
-          upload-stream SHA gate in 9.00.0 rather than fix this, so a drifted
-          index was invisible to users.
-        - Carried the four PRs upstream left open: WiFi bridge mode / backup &
-          restore / bench mode follow-ups (#40 CLI legacy key), favicon + PWA
-          branding (#41), vehicle geometry settings (#42), and the OTA "Latest
-          build" channel (#43).
+V9.00.6 - GitHub main after 9.00.5, plus a toolchain update:
+        - #45 Stock no longer feeds the reported Haldex engagement back as
+          the lock command (positive feedback loop that latched high lock
+          until FWD / power cycle). Stock now commands zero forced lock, and
+          inline Stock (base mode or force trigger) forwards frames untouched.
+        - #46 when a bus goes silent (1 s health timeout), zero the latched
+          inputs it feeds: speed, pedal, ESP/hazard force flags, ABS valid
+          (chassis) and reported engagement (Haldex). Boot state unchanged.
+        - #47 default VAG correction factor (no learn table) now matches its
+          comment: CF = (target + 20) / 2, was target / 2 + 20 (+10 CF).
+        - #49 line endings normalised to LF (no code change).
+        - platform pioarduino 54.03.20 -> 55.03.312; "Async TCP" added to
+          lib_ignore so only mathieucarbou/AsyncTCP is linked. 55.03.312
+          needs PlatformIO Core >= 6.2.0 (older Core refuses the platform).
+          Arduino core 3.3.12 / IDF 5.5.5. Flash 92.5% of the 0x1C0000 app
+          slot; littlefs.bin fills the 0x70000 partition exactly.
+        - Boot-loop fix: if NimBLEDevice::init() fails (C6 controller logs
+          "ble ll env init error code:-13"), bleStart() now bails out and BLE
+          stays off until reboot. Previously it carried on into getNumBonds()
+          on an un-started host -> NULL mutex -> panic ~1 s after WiFi up.
+          Free internal heap is logged just before BLE init.
+        - Root cause of both the BLE -13 and the web UI serving broken pages:
+          internal heap. Measured 23.7 KB free / 14 KB largest block before
+          BLE init (IRAM +28 KB vs the pre-BLE build on the newer core, plus
+          static RAM growth). Freenove WS2812 lib dropped - it hard-codes a
+          256-LED RMT buffer (24 KB static) for our one LED; replaced by
+          OneLed (include/OpenHaldexC6_led.h) on the core's
+          rgbLedWriteOrdered(), same API/colour order/brightness behaviour.
+        - debugMemory (defs.h): heap + every task's stack high-water mark,
+          15 s after boot then every 60 s, to right-size task stacks.
+        - Task stacks sized from debugMemory: 10 frame tasks 8000/4000 ->
+          2560 (used ~250-450 B), AsyncTCP 16 KB -> 8 KB; updateTriggers
+          2000 -> 3072 and broadcastOpenHaldex 1000 -> 2048 (432 / 644 B
+          left - near overflow). With the LED change, BLE now starts (48 KB
+          free at init) but left only 10 KB, so the web UI still died on
+          page load; this frees ~44 KB more.
+        - Long Learn reworked around "prove all-on, then test each static block":
+          core = lock-driven blocks (frameEditLockDriven, always sent); all-on
+          must give a smooth 100% sweep or the run stops; two all-on reads at
+          CF 20/40/70/100 give the reference + noise threshold; each static
+          block is then tested OFF ON ITS OWN at those points (was: cumulative
+          removal, each block judged against a shrinking set); full
+          confirmation sweep with all no-effect blocks off together, else
+          everything left on (interaction flag). ~6-8 min on Gen5. Gen5
+          BPK Adjust kept (hunting -> Fix Hunting + ceiling walk), result kept.
+        - #51 canBusRecovery() now restarts ANY stopped controller (was only
+          one it had put into bus-off recovery itself). Light sleep can power
+          down the TWAI domain (sleep_allow_pd), leaving a controller stopped:
+          no frames to the Haldex, and in non-aggressive low power the wake
+          check never saw the car come back.
+        - #51 with CAN sleep enabled, an ESP_PM_NO_LIGHT_SLEEP lock is held
+          while awake; updateTriggers releases it only when the low-power
+          state machine deliberately sleeps and takes it back on wake, so
+          automatic light sleep can't power down CAN with the car running.
 
-V9.10.1 - removed the dead "Generation 3 - Volvo" option from the Haldex
-          Generation dropdown. There is no generation-3 code anywhere in the
-          firmware and /api/settings rejects the value outright (API.cpp accepts
-          only 1/2/4/41/50/51/52), so selecting it was silently ignored - a
-          Volvo owner would read the option as support that does not exist.
-        - README: hardware badge said "Gen1 | Gen2 | Gen4" and omitted Gen5
-          entirely; the body text filed all of Gen5 under MQB when 0AY is
-          PQ-based. Both corrected, and the badges now point at this fork
-          rather than reporting upstream's release and commit activity.
-        - Dashboard now says WHY lock is being withheld. From 9.00.0 the
-          speed/throttle window gates every lock path - the force-mode triggers
-          and Expert used to bypass it - so an inherited non-zero "Disengage
-          Under Speed" or "Minimum Throttle" silently zeroes lock in every mode
-          and the only symptom was "Target: 0%". /api/dashboard now reports
-          lockGated + lockGateReasons and the UI names the setting and its
-          configured value. lock_enabled() is defined in terms of the new
-          lock_gate_blocking() so the stated reason cannot drift from the
-          decision actually taken; lock behaviour itself is unchanged.
-        - Release notes now come from this changelog (make_release.py reads the
-          entry for the version being built) instead of a placeholder string,
-          and nothing from a commit message is interpolated into a shell
-          argument in CI. 9.10.0's own entry was backfilled the same way.
-        - Indexed the eight historical releases inherited from upstream
-          (2.10.1 through 7.00.0) with real hashes, so `verify --strict` is
-          clean and every published folder is accounted for. They are marked
-          ota:false - documented and downloadable, but not offered for
-          push-button OTA, since they predate the current OTA page and pushing
-          one over the air would strand the unit's updater. Use Update from
-          Files for those. The set offered to devices is unchanged.
+V9.00.7 - relay the car's CAN frames to gauges over ESP-NOW:
+        - New "Relay CAN Frames to Gauges" setting (canRelay, default Off) under
+          Controller Options: Off / every frame / each ID up to 50, 20 or 10
+          per second (29-bit IDs never capped). In the backup keys.
+        - Every bus-0 frame is tapped in parseCAN_chs before any brake /
+          handbrake edit, so gauges see the frame as the car sent it; a
+          can2gauge with power only (no CAN wire) then decodes the car.
+        - Up to 24 frames per 250-byte packet, sent when full or 10 ms after
+          its first frame; broadcast peer at 6 Mbit/s while relaying.
+        - Shared files include/cannow_proto.h + cannow_tx.h (identical in
+          can2gauge / adc2can). Relay stats in the status JSON (canRelay).
+          Not yet tested on hardware.
 
-V9.11.0 - OTA tab: "Release source" switch between this fork and the official
-          Forbes Automotive releases. On the Forbes source every stable
-          official release is offered as a switch back (not hidden as a
-          rollback), the install button and confirmation say so plainly, and
-          the fork-only "Latest build" channel and rebuild check are hidden.
-          Installing one returns the unit to the official firmware, whose own
-          updater follows Forbes from then on; the hint and confirmation name
-          the fork's website as the way back. Kept in this browser only.
-        - Phone install guide published at louij2.github.io/OpenHaldex-C6
-          (site/, deployed by .github/workflows/pages.yml): iPhone-only steps
-          in English and Italian, download buttons that always point at the
-          latest release, and official Forbes files for going back.
-        - The guide deliberately uploads FIRMWARE FIRST when coming from
-          upstream 9.00.0. Seven different 9.00.0 binaries were published; the
-          five before 16:04 on 2026-09-20 still answer "200 OK" after the first
-          upload chunk (the bug 9.00.0's own changelog calls the root cause of
-          OTA never completing) and write the filesystem while it is mounted,
-          with no recovery page. On those, a cut-short firmware upload is
-          refused by esp_ota_end and the unit keeps its old firmware, whereas
-          a cut-short filesystem upload can boot-loop it. Firmware first means
-          the filesystem then goes through this fork's fixed uploader.
+V10.00.0 - (beta, 2026-10-18) new market: Volvo and SAAB. Every new market gets a
+          new major number (V11 = MQB Evo).
+        - Four new Haldex generations, standalone only for now:
+            21  Generation 2 - Volvo P2 (Pre-Facelift)  250 kbit/s, 29-bit IDs
+             3  Generation 3 - Volvo P2 (Facelift)      500 kbit/s, 29-bit IDs
+            43  Generation 4 - Volvo (P3)               500 kbit/s, 11-bit
+            44  Generation 4 - SAAB 9-3 XWD             500 kbit/s, 11-bit
+          IDs, send rates, counters and the lock / "lock active" bytes are a
+          starting point; the Volvo network heartbeat (bytes 6-7 swap to their
+          opposite every 100 ms) matches a real Volvo trace. Static bytes are
+          fixed starting values, NOT decoded yet: tune with the serial lab OVR
+          command + SavvyCAN, then decode from our own logs.
+        - Haldex replies decoded for all four (provisional 0-255 -> 0-100 %
+          until logs give the scaling); SAAB also gives a temperature
+          (0x210 byte 2 - 40) shown as haldexTempC in /api/status.
+        - CAN bus speed now follows the generation: Volvo P2 Gen2 runs both
+          buses at 250 kbit/s (why a P2 user saw no Haldex health at 500k).
+          Changing to or from it saves the generation and restarts the
+          controller ~2 s later; /api/settings reports canSpeedKbps.
+        - Lock scaling for Volvo / SAAB is straight-through (100 % = the
+          strongest known lock value) until Learn is run.
+        - The VW chassis decoder (speed / pedal / brake from 0x280, 0x288,
+          0x320 ...) is skipped on Volvo / SAAB, where those IDs mean other
+          things. Inline (non-standalone) Volvo / SAAB passes frames through
+          untouched.
+        - Chassis decode for the non-VW cars (new OpenHaldexC6_ChassisOther.cpp),
+          so Expert mode, the speed / throttle limits and brake / handbrake
+          follow work on them:
+            41 Insignia  speed 0x34A rear wheels /32, pedal 0x0C9 b4, RPM 0x0C9,
+                         brake 0x0F1 b0 bit1, handbrake 0x1F1 b4 bit4
+            42 Focus RS  speed / RPM / pedal 0x201, brake 0x205 b2 bit6,
+                         handbrake 0x433 b3 bit0
+            43 Volvo P3  speed 0x148, pedal 0x020, brake + RPM 0x12A (no
+                         handbrake yet); from the V60 DBC, not checked on a car
+            44 SAAB 9-3  RPM 0x110, speed 0x280 (four wheels), handbrake 0x380
+                         (no brake / pedal yet)
+            21 Volvo P2  2002 model-year IDs only: speed 0x00D28026, RPM
+                         0x0032C01E, brake 0x0012C024, pedal 0x00E00020 b3
+                         (19 rest .. 187 floored); checked against public 2002
+                         S60 logs (IDs change by model year)
+        - SAAB 0x110 bytes 1-2 are engine RPM: the "lock active" value sent
+          there is 2000 rpm (comment corrected, behaviour unchanged).
+          41 / 42 replayed against our own labelled logs. The VW decoder no
+          longer runs on 41 / 42, where foreign frames could be misread.
+        - Volvo Gen4 0x12A is EngineData: the "lock steps" are engine RPM
+          values (comments corrected, behaviour unchanged).
+        - Serial lab OVR now takes 29-bit IDs (override slot ID widened to
+          32-bit), and no longer writes a VW CRC into SAAB's 0x110.
+        - Web UI: "Generation 3 - Volvo" option (was there but rejected by the
+          firmware) now works; GM option renamed "Generation 4 - GM (Vauxhall /
+          Opel)" so it isn't confused with the 9-3.
+
+V10.00.1 - (beta, 2026-10-19) the car's drive mode select can force a mode (MQB):
+        - New "Use Drive Mode to Force Mode" setting (driveModeForce, default
+          Off) under Mode Options, with one drop-down per drive profile.
+          Defaults: Comfort = Stock, Sport = 60:40, Race = 50:50,
+          Individual = Expert, everything else N/A (left alone).
+        - The profile is read from Charisma_07 (0x3E8) byte 1 bits 0-3
+          (CHA_Current_Mode); if a car doesn't send that, the engine request
+          in Charisma_01 (0x385) byte 2 is used instead (can't see Individual).
+          Our own MQB logs read 7 = Individual. Gen5 0CQ / 0AY MQB / VAQ only.
+        - Lowest priority: TC / hazards / external button still win. No
+          Charisma frame for 3 s = no drive mode force.
+        - Profile and mode numbers from the MQB K-matrix and jilleb/MQB-FPA
+          (credited in the README).
+        - The header banner shows a drive mode force, e.g. "Expert (Sport>60:40)".
+        - New Drive Mode card on Diagnostics: the car's profile, where it was
+          read from, what the gateway asks the Haldex / VAQ for, what the
+          Haldex reports back, and what's being forced.
+        - Haldex state legend fixed: the web page read the state byte as hex
+          text, so 0x12 showed as 0x18 on every generation. Gen5 now decodes
+          Allrad_03 byte 3 as mode (bits 0-3) + status (bits 4-5) with names,
+          and the VAQ (Gen52) gets its own (Quersperre_03 byte 3, bits 1-4 / 5-6).
+        - Force Mode Priority now saves: the web page sent it, but the firmware
+          never read it, so it was always Hazard > TC > Ext after a reload.
+          Also in the backup file now.
+
+V10.00.2 - (beta, 2026-10-21) parts of PR #54 (Luca C):
+        - Dashboard says why lock is held at 0%: when Disengage Under / Above
+          Speed or Minimum Throttle Before Lock is cutting lock, a line under
+          Haldex Engagement names the setting and its value. Lock behaviour
+          unchanged; lock_enabled() is now built on lock_gate_blocking(), and
+          the dashboard sends lockGated + lockGateReasons. Uses the mode in
+          use (force triggers / drive mode win), so Stock / FWD never show it.
+        - OTA tab no longer offers releases that can't fit this partition
+          layout (9.00.0 and older need a USB flash since 9.00.5).
+        - tools/can_capture.py: record and compare CAN traffic from a laptop
+          through analyzer mode (GVRET, port 23).
+
+(2026-10-22: renumbered again. V11 = this OEM-spec rework; the MQB Evo / CAN FD
+ line that was 11.00.x becomes V12.)
+
+V11.00.0 - (beta, 2026-10-22) every generation brought in line with what the OEM
+          Haldex code actually reads and reports (documents/haldex-binaries/
+          CONTROL_AND_DTC_SPEC.md + leaf_trace/spec_<unit>.md), OEM and Standalone.
+          Built on 10.00.2.
+        - Shared:
+          > OEM mode, every non-Stock mode: the job is to achieve the lock %. The
+            OEM-code work confirmed which bytes do that, so the OEM defaults are
+            the lock-driving blocks only: the unit's lever byte + the bench-proven
+            lock-scaled wheel speeds (+ Motor_1 demand where used). Stock is
+            untouched passthrough. Frames that only carry flags the unit doesn't
+            need for lock (Bremse_1 ABS bits, steering, gear) pass through.
+          > Direct-lever helpers lever_lock_percent() / vag_lever_byte(): Bremse_4
+            byte 0 = 0x7F at 0 % (valid "open"), 0x80 + p x 1.25, the unit's own
+            full value at 100 %. Before, 100 % sent 0x7F (clutch OPEN) on Gen4 and
+            partial lock sent < 0x7F, which the units ignore.
+          > ABS braking decoded (PQ Bremse_1 b0.2, MQB ESP_21 b7.0). New "Follow ABS"
+            setting (default ON, Output Options, in backups): opens the clutch while
+            the ABS is braking (new lock gate "abs") - our lock request outranks the
+            unit's own ABS release, so we do it for it. Off = our lock overrules the
+            ABS, and standalone sends "not braking".
+          > OEM mode, Gen1/2/4/5: a brake / handbrake switch wired to our input pin
+            is ORed into the car's own bit (Motor_2 / Kombi_1, ESP_05 + CRC /
+            Kombi_01) when Follow Brake / Follow Handbrake is on - for cars with
+            a physical switch fitted.
+          > Follow Brake / Follow Handbrake (renamed from "... Input"): the bits are
+            passed through in OEM mode and now put into the Standalone frames;
+            Follow Handbrake also opens the clutch while the handbrake is on (new
+            lock gate "handbrake"). Brake / handbrake / ABS from CAN cleared when
+            the chassis bus goes quiet.
+          > Haldex health decoded per generation (fault, plausibility, over-temp,
+            limp, AWD lamp, temperature, temp-sensor fault, fault stored) in each
+            generation's own case of parseCAN_hdx - the old shared PQ bit decode
+            gave Gen1 a false "limp". Dashboard: red "Haldex Warning" card + new
+            Haldex Data tiles; /api/dashboard: limpMode, awdWarning,
+            tempSensorFault, faultStored, haldexTempC (all gens), healthSupported,
+            haldexWarnings, absBraking. Diagnostics: "ABS Braking (CAN)".
+          > "Invert Brake / Handbrake Input" now only flips the input WIRE. In OEM
+            mode it used to flip the car's own CAN bit too, so the Haldex saw the
+            handbrake on while it was off.
+          > One-off settings upgrade (EEP.cpp migrateSettingsToV11, key "v11Mig"):
+            OEM masks still on the old default move to the new one, and every
+            lock-driving block is switched on in customised masks (a VAQ keeps
+            its saved mask); standalone masks get the newly-needed frames switched on
+            and unread frames off; saved learn table cleared on Gen1/2/4/0CQ/0AY
+            because the lever changed - RUN LEARN AGAIN after updating.
+        - Gen1 (02D):
+          > Bremse_4 0x2A0 byte 0 torque ceiling is the lever on its own scale
+            (gen1_lever_byte: 0x7F open, 0x81-0xC9, 0xFD full - 0xCA+ is already
+            full on the 02D) with Motor_1 held at max demand.
+          > Standalone now sends Motor_2 0x288 (fixes the permanent false "limp").
+          > rpm no longer scaled with lock (pump cut off below 400 rpm): OEM passes
+            the real rpm, standalone fixed 0x4E21. 50:50 loss torque 0x00.
+          > 0x2C0 decoded only on ID 0x2C0, no more 255 % at raw 0x7F; bit 2 / 4
+            are status (ceiling active / inputs incomplete), not faults.
+          > OEM Bremse_1 edit keeps the ABS clutch-release and brake bits.
+          > New blocks 4 Bremse_4, 5 Motor_2, 6 Kombi_1. Defaults OEM 0x19 (Motor_1,
+            Bremse_3, Bremse_4), SA 0x3D.
+            Kombi_1 handbrake now decoded from CAN on Gen1.
+        - Gen2 (7H0 / 1K0):
+          > Engagement read from 0x2C0 byte 1 (byte 4 is never written - it always
+            showed 0 %, so Learn could never work on Gen2). Health per OEM code:
+            over-temp, fault + lamp, coupling open.
+          > Bremse_4 byte 0 is now the linear lever (0x7F open .. 0xFD full) - it
+            was written as all zeros. Motor_1 held at full demand with loss torque
+            0 (they used to cancel); OEM rpm passed through.
+          > OEM edits keep the car's ABS/ESP, brake and handbrake bits and never
+            lift the ABS module's own 0x2A0 limit.
+          > Standalone Kombi_1 sent "handbrake pulled" all the time - now released
+            (or the real handbrake with Follow Handbrake). 0x4A8 alive counter
+            changes every frame; Motor_5 no longer bumps Bremse_1's counter.
+          > Defaults OEM 0x31 (Motor_1 + Bremse_3 + Bremse_4), SA 0x1E7D.
+        - Gen4 (0BR / 0BS / 2K):
+          > Bremse_4 lever 0x7F / 0x81-0xFC / 0xFE in OEM and standalone - Expert
+            100 % and forced 50:50 sent 0x7F = clutch OPEN. Learn sweeps the lever.
+          > Standalone adds Motor_2, Motor_5, Bremse_5, Bremse_8, Getriebe_1 (blocks
+            12-16) - a missing Motor_5 made the unit report limp by itself.
+            Motor_1 clutch-pedal bit fixed; steady Motor_1 and four equal steady
+            wheel speeds (real speed when chassis CAN is there).
+          > Feedback: engagement 0x80-0xFD = 0-100 %, temperature (b4 - 60),
+            temp-sensor fault, fault stored, real health bits.
+          > Defaults OEM 0x32 (Motor_1 + Bremse_3 + Bremse_4), SA 0x1F9FF
+            (Bremse_11 / Kombi_2 off).
+        - Gen5 0CQ (+ VAQ where the spec allows):
+          > ESP_14 Min = Max = 0-250 (exact request). Full lock used to send
+            0xFB-0xFE = "no request", so the unit fell back to Motor_11.
+          > OEM edits keep the car's real gear, brake pressure, ABS and handbrake
+            bits; Motor_12 is a steady 2000 rpm and Motor_11 V3 b6/b7 fixed.
+          > Standalone: steady 2000 rpm Motor_12, wheel speeds no longer follow
+            lock, Motor_11 V3 b6/b7 fixed, ESP_02 0 g, LWI angle 0, Motor_Code_01
+            factor + CRC fixed, ESP_07 counter wrap fixed; brake (ESP_05), handbrake
+            (Kombi_01) and ABS (ESP_21) bits from the Follow settings / car ABS.
+          > Allrad_03 status 2 and 0x17F0000F report a Haldex fault (clutch
+            released) - was shown as "closed". ESP_14-accepted bit decoded
+            (/api/dashboard leverAccepted). 0xFE no longer shows 101 %.
+          > Defaults OEM 0x1D (ESP_19 lock-scaled wheel speeds, Motor_12, Motor_11,
+            ESP_14; a VAQ keeps its saved OEM mask on upgrade). SA stays all-on: the
+            0CQ only needs 0x0FE0FB5F but the VAQ shares the mask. Launch PWM Floor
+            no longer used.
+        - Gen5 0AY (a PQ unit, not MQB):
+          > Bremse_4 lever 0x7F / 0x81-0xFC / 0xFD (0xFE = HOLD on the 0AY);
+            100 % used to send 0x00, which the unit ignores.
+          > Engagement on the unit's own scale (99 -> 100 snap removed);
+            temperature, temp-sensor fault, fault stored decoded.
+          > Standalone: steady Motor_1, equal wheel speeds, new Getriebe_1 0x440
+            (block 18); Bremse_8 / Bremse_11 / Kombi_2 off (not received);
+            Bremse_2 / Bremse_5 values corrected; Motor_5 counter fixed.
+          > Defaults OEM 0x06 (Bremse_3 lock-scaled + Bremse_4), SA 0x6BF7F. Kombi_01 0x30B rewrite
+            removed (the 0AY doesn't receive it).
+        - Volvo:
+          > P2 Gen3: lock via lever_lock_percent() (0..0xBC, all gates applied);
+            real-car rolling counters on 0x0042406C / 0x00224024 / 0x0080401E;
+            standalone adds 0x00C0402A, 0x10E24000, 0x11220028, 0x11420006 from a
+            500 kbit/s S60 log (vehicle-logs-public/volvo-CAN-exploration).
+            Feedback 0x1020000A decoded from the OEM signal table: byte 6 =
+            measured clutch value (100 % = VOLVO_P2G3_ENGAGEMENT_FULL_SCALE, 150 -
+            bench-check), byte 7 bits 6-7 fault / limp, bits 2-3 input monitors.
+            Bus confirmed 500 kbit/s from the code (C1BTR 0x1641 at 20 MHz); the
+            Volvo SPC (gen 53) is also 500k (FlexCAN_0, 8 MHz crystal).
+            0x01A2402A content still needs a bench log.
+          > NEW generation 53 - Volvo Gen5 SPC 31380867 (standalone only): lever
+            0x041 bytes 6-7, feedback 0x126 torque + fault status decoded; the
+            other 23 monitored frames sent as zero placeholders for OVR tuning.
+          > Volvo P2 XC166 31431022: diagnostic IDs noted only - needs a capture.
+
+V11.00.1 - (beta, 2026-10-24) Volvo P1 (S40 / V50 AWD), generation 31 - "Generation 3 -
+          Volvo P1 (S40 / V50)". From Adam's 2005 V50 T5 AWD logs
+          (documents/vehicle-logs/gen3/P1_V50_T5_AWD_DECODE.md). 500 kbit/s, 29-bit IDs.
+        - Why the P2 choices showed no Haldex: the P1 uses none of the P2 IDs. Its AWD
+          module sends one frame, 0x1960000A; the P2 decode only looked for 0x1020000A.
+        - Haldex feedback: 0x1960000A byte 6 bits 0-1 + byte 7 = 10-bit engagement,
+          540 = 100 % (VOLVO_P1_ENGAGEMENT_FULL_SCALE); byte 5 = status, shown on the
+          dashboard legend. No fault bits found yet (health tiles show "--").
+        - Standalone: all 22 frames the car puts on its high-speed bus, each a
+          frame-edit block (all on), at the car's own rates. Steady bytes from a real
+          30 km/h cruise frame; counters, toggles, the network heartbeat / clock
+          (0x1BE0493C) and the four wheel pulse counters (0x19A00002) run like the
+          car (patterns from the full C30 trace). Brake / handbrake from Follow
+          Brake / Follow Handbrake. The car's VIN pages aren't sent.
+        - 0x0340412E is the steering angle sensor (not the steering pump): byte 0 =
+          counter + direction bit, bytes 1-2 fine rate, bytes 4-5 coarse rate, bytes
+          6-7 angle, byte 3 a check byte = 0x02 - (byte 0 nibbles swapped + byte 1
+          bit 7 + bytes 4-7), 0x04 with the direction bit set. Fits all 26,820
+          logged frames from both cars. Standalone now works it out (wheel straight,
+          not turning) instead of replaying the idle sequence. No other P1 frame has
+          a check byte.
+        - What drives the module (from the logs): engine torque, almost 1:1 (about
+          one engagement count per torque count, 100-400 ms behind, saturating near
+          540); big front wheelspin sends it to full; it never locks while stopped.
+        - New "Volvo P1 Standalone" card (Settings, generation 31 only, saved and in
+          backups): Lock Source (engine torque - default / wheel slip / both), Road
+          Speed (5-120 km/h, default 30), Torque at 100 % (0-1000, default 600),
+          Front Wheel Slip at 100 % (0-40 km/h, default 10), Reset to Defaults, and a
+          live line showing the lock asked for, torque / pedal / rpm / wheel speeds
+          sent and the module's engagement count. The mode buttons, Expert and Learn
+          all drive it through lever_lock_percent(), as on the other units.
+        - Learn / Long Learn on the P1: 600 ms per step (VOLVO_P1_LEARN_SETTLE_MS,
+          other generations 400). In OEM mode they say it needs Standalone for now.
+        - Wheel pulse counters (0x19A00002) follow the front / rear speeds; counters
+          3-4 confirmed as the fronts from the wheelspin log.
+        - Flash space: DEBUG() messages were always built in and printed - the switch
+          used "#ifdef enableDebug", which is true even when enableDebug is 0. Now
+          "#if enableDebug": saves flash (firmware was at 97.5 % of its slot) and
+          stops the constant serial output. No partition change, OTA unaffected.
+        - Flash space: Espressif's libraries rebuilt smaller with custom_sdkconfig in
+          platformio.ini - no library log text, silent asserts, no error-name table,
+          no crash dump (there was never a partition for one), no WiFi FTM / WPA3 /
+          OWE (the home WiFi bridge can't join a WPA3-ONLY router). OpenHaldex now
+          has its own PlatformIO core folder (C:/.platformio-openhaldex) because
+          that rebuild happens inside the packages folder, which the other ESP32
+          projects share. Same partitions, so OTA keeps working.
+        - Chassis decode (OEM mode, or standalone with the car connected): speed
+          0x02104136, rpm 0x0090411E, pedal + brake switch 0x0300410E, handbrake
+          0x0110483C - so Expert mode and the speed / throttle limits work. DSTC off
+          (0x02000026 byte 6 bit 4) drives "Use TC to Force Mode", like the VW ESP
+          button, and shows on the Diagnostics ASR / TC pills.
+        - OEM mode is untouched passthrough for now: Stock and the lock feedback
+          work; editing frames for 50:50 / 60:40 etc. comes next.
+        - Frame-edit masks: slot 5 kept spare (V12's Gen6 goes there) and P1 in slot
+          6, so saved settings line up with V12. Older saves keep their choices -
+          the loader now reads saves with fewer generations. Block CAN IDs are
+          32-bit now (Volvo's 29-bit IDs didn't fit).
+
+V11.00.2 - (beta, 2026-10-29) bus sleep + OTA fixes (PR #56 / #57, Luca C), and the
+          Volvo P1 work from after the first car test (2026-10-25 - not in the
+          published V11.00.1).
+        - 0x6B0 broadcast no longer keeps the car awake (PR #56): it went out every
+          200 ms on every unit, whatever "Broadcast over CAN" was set to, so with
+          the car locked the drivetrain ECUs kept seeing traffic and never slept
+          (seen on an Audi S1 gen 51 for hours). Now it only goes out with the
+          setting on AND the Haldex heard from in the last 5 s
+          (BROADCAST_HALDEX_QUIET_MS). The MQB steering wheel controller already
+          needs the setting on for 0x6A0, so it's unaffected.
+        - OTA safety check once per upload, not on every chunk (PR #57): one flicker
+          of speed / bus fault / temp in the car aborted the firmware upload, and
+          wiped the web UI on a filesystem upload (unit left on the recovery
+          page). The restart at the end is still checked: if the car isn't safe
+          then, the new firmware is kept and starts at the next power-on. (Known:
+          the OTA page then says "Rolled back" - the message is wrong, the
+          firmware is fine.)
+        - Volvo P1 frame bisect: in Standalone, a P1 frame-edit block switched OFF now passes
+          the CAR's own frame with that ID to the module, instead of sending nothing.
+          All off = the module sees the real car; tick ours back one at a time on a
+          drive to find the one it won't accept (the module ignored our lock request).
+        - Gear: the rpm sent is now Road Speed x a real gear ratio (new Gear setting,
+          1st 117 / 2nd 66 / 3rd 44 rpm per km/h from the V50 logs, default 2nd) and
+          no longer rises with the lock. 4500 rpm at 30 km/h matched no gear - like a
+          slipping clutch. VOLVO_P1_RPM_AT_ZERO / _FULL replaced by the ratios.
+        - Smaller Espressif libraries (custom_sdkconfig, see V11.00.1) are really in
+          use from this release: the published V11.00.1 was built with the stock
+          libraries, and the smaller build stopped in esp-modbus because
+          CONFIG_LWIP_MAX_SOCKETS / CONFIG_BT_NIMBLE_MAX_CONNECTIONS were -D build
+          flags as well. Both moved into custom_sdkconfig, so the libraries now
+          really get 8 sockets (stock 16) and 2 BLE links (stock 3) - before, only
+          our own code saw those numbers. Bench-test WiFi, OTA from GitHub, BLE.
+
+V11.00.3 - (beta, 2026-10-30) contributor merges from main (PR #58 / #60 / #61, Luca C).
+        - Web UI stored gzipped (PR #58): tools/gzip_webui.py runs before the build and
+          packs a gzipped copy of data/ (in the build folder - data/ itself is never
+          changed) into littlefs.bin. The web server sends "index.html.gz" whenever
+          "index.html" isn't there, so the UI works the same, takes less flash and
+          loads faster over WiFi. version.json stays plain (the firmware reads it).
+          fsUiAvailable() now accepts either form, so the recovery page doesn't
+          show by mistake.
+        - OTA "Release source" (PR #61): lets a fork's build offer a way back to the
+          official releases. UPD_FORK is null here, so nothing changes on screen.
+        - tools/can_capture.py (PR #60) now on main as well (already in this folder).
+
+V11.00.4 - (unreleased) engine temperatures and a faster Live Data refresh.
+        - Coolant Temp and Oil Temp tiles on the dashboard's Live Data card, read from
+          PQ Kombi_2 (0x420): oil = byte 3 - 60 degC, coolant = byte 4 x 0.75 - 48 degC.
+          Gen1 / Gen2 / Gen4 / 0AY only (the PQ cars); "--" after 2 s without the frame.
+        - Live Data Refresh (Display Options): the Live Data tiles, engagement gauge and
+          lock graph can update 4, 5 or 10 times a second from a new small /api/live
+          reply. The rest of the dashboard stays at twice a second. Default unchanged.
+        - Fix (Gen1 / Gen2, OEM mode): lock capped at ~41 % on a parked Gen1 since V11.00.0
+          (worse than V10). V11 passed the car's real (idle) rpm in Motor_1 while Bremse_3
+          still fakes ~13 km/h wheel speeds, so the unit read a tall gear and halved its own
+          clutch request - the Bremse_4 ceiling can't add lock above that. Now Motor_1 rpm =
+          fixed 0x4E21 (4872 rpm, as standalone and V10) whenever lock is wanted, engine
+          running or not; 0x0021 (8 rpm, pump off - as V10 at 0 %) when no lock is wanted (FWD). RUN LEARN AGAIN on Gen1 / Gen2.
+        - Fix (Gen1, OEM mode): the rpm fix alone left 50:50 at ~42 %, ~11 % on the brake and
+          ~20 % after it (standalone 100 %). V11.00.0 had switched the Bremse_1 and Motor_3
+          edits off on the spec's word, so the car's Bremse_1 (brake bits, 0 km/h) reached
+          the 02D. Bremse_1 edit back to V10 / standalone (b1 = 0, b2 = 0, b3 = 0x0A), Motor_1
+          b4 / b7 as V10, Gen1 OEM default 0x19 -> 0x1F, one-off "v1104G1" upgrade turns both
+          blocks on in saved masks and clears a Gen1 learn table. ABS braking still opens the
+          clutch: car's b0 bit 2 passes, Follow ABS / Handbrake read the car's original frame.
+        - Fix (Gen2 / Gen4 / 0CQ / 0AY, OEM mode): same cause as Gen1 - V11.00.0 switched
+          off frame edits V10 had on, on the spec's word (not bench-proven), and let the
+          car's brake bits / brake pressure reach the unit. V10's blocks are back on with
+          V10's bytes; V11's lever bytes stay. Defaults: Gen2 0x31 -> 0x3F (Motor_3,
+          Bremse_1 V10 edit, Bremse_2), Gen4 0x32 -> 0x3F (LW_1, Bremse_1 b0 0x20 / b1 0x40,
+          Bremse_2), 0CQ 0x1D -> 0xFF (Getriebe_11 gear 0, ESP_10, ESP_05 V10 'not braking',
+          EPB_01), 0AY 0x06 -> 0x0F (Motor_1 V10 lock-scaled demand, LW_1). One-off
+          'v1104Gx' upgrade turns them on in saved masks (a VAQ keeps its mask) and clears
+          those generations' learn table. Bremse_1 / ESP_05 are now always-sent (core) blocks.
+          Not car-tested on these generations yet - Gen1 was the test car.
+        - Fix (OTA from V11.00.2 or older): index.html and app.js are back to plain (not
+          gzipped) in littlefs.bin. Old firmware checks for those exact names and flashes the
+          web UI first, so the gzipped image was rejected (500), wiped, and the unit fell to
+          the recovery page.
 
 */
 
@@ -260,89 +620,21 @@ V9.11.0 - OTA tab: "Release source" switch between this fork and the official
         > add 'ota' to match existing layout
         > add reduction in throttle/speed off
         > move CAN into interrupt based - ESP_INTR_FLAG_IRAM
-
-V9.12.0 - upstream fixes synced from Forbes-Automotive main (up to 4215b76,
-          upstream 9.00.6), all by Kile Thomson, cherry-picked onto this
-          fork's flash layout:
-        - #51 a stopped CAN controller is now restarted whatever stopped it,
-          and with CAN sleep enabled a no-light-sleep lock is held while awake.
-          Automatic light sleep could power down the TWAI domain with the car
-          running, leaving a controller stopped: no frames to the Haldex.
-          Strong candidate for the Gen5 0AY "FWD in every mode" reports - on
-          Luca's S1 (CAN sleep + aggressive on) the Haldex bus was seen to go
-          silent while the chassis bus kept running.
-        - #45 Stock no longer feeds the reported engagement back as the lock
-          command (latched high lock until FWD / power cycle). Stock now
-          commands zero forced lock and forwards frames untouched.
-        - #46 when a bus goes silent, zero the inputs it latched (speed,
-          pedal, ESP/hazard force flags, ABS valid, reported engagement).
-        - #47 default VAG correction factor matches its comment.
-        - Line endings normalised to LF across the tree, as upstream #49.
-        NOT taken: upstream #44 Bluetooth LE / DashCAN and the new partition
-        table it needs (app slots 0x1C0000, LittleFS 0x70000). A partition
-        table cannot change over OTA, so taking it would force every unit -
-        including ones updated only from a phone - through a USB flash. This
-        fork stays on the 0x1A0000 / 0xB0000 layout so phone updates keep
-        working. Upstream already carries #39-#43 from this fork.
-
-V9.12.1 - OTA: releases that don't fit this unit's partitions are no longer
-          offered. "Switch to official" previously offered Forbes 9.00.6,
-          which needs the 9.00.5+ Bluetooth layout (0x1C0000 app slots): on
-          this fork's 0x1A0000 / 0xB0000 layout the web UI step would succeed
-          and the firmware step then fail, leaving a mismatched unit. It now
-          offers the newest official release that fits (currently 9.00.0) and
-          says newer ones need a USB flash. Same check offered upstream.
-V9.13.0 - Diagnostics: "Bus Monitor" card and GET /api/busmon. A passive
-          census of every CAN ID received on each side of the controller
-          (car / Haldex): count, rate, first/last seen, payload changes and
-          last payload. Save a baseline (kept in NVS, survives OTA) and IDs
-          outside it show as NEW, baseline IDs gone quiet as missing.
-          Receive-only, works in every mode, and polling it never keeps the
-          controller awake. tools/busmon.py reads, saves and diffs it.
-        - Sleep log (same card, GET /api/buslog): 2-minute samples of
-          frames/s and active IDs per side for 48 h, plus an event file on
-          LittleFS: boot (with reset reason), each side going quiet (and the
-          IDs heard last), the ID that woke it and how long it slept, and
-          low-power sleep/wake. Answers "did the bus really sleep, and what
-          woke it" without anyone watching. `busmon.py log` prints it with
-          wall-clock times.
-V9.13.1 - fixes for 9.13.0 found on the first car run:
-        - Phone OTA in the car could leave the web UI wiped (recovery page):
-          the safety gate was re-checked on every upload chunk, and one
-          flicker of a CAN-derived flag mid-upload made the filesystem path
-          erase the partition. The gate is now checked once, before anything
-          is written; a firmware reboot is still gated and waits for the next
-          power-on if the car is no longer safe. The sleep log no longer
-          writes to LittleFS while a filesystem update is running.
-        - GET /api/busmon could truncate and take WiFi down: it buffered the
-          whole body in ~40 KB of free heap. It (and /api/buslog) are now
-          rendered in chunks from a small snapshot, with a low-memory 503
-          instead of a crash; /api/buslog/events streams from the file
-          (?old=1 for the rotated one).
-        - About 14 KB of RAM back: 100-ID table (was 200), 12 h of samples
-          (was 48 h; long history is for tower), smaller log task stack.
-V9.14.0 - Diagnostics: "Fault Codes (DTC)" card and /api/dtc. Reads and
-          clears the Haldex module's stored fault codes over its UDS channel
-          (Gen5 family: 50/51/52), with status (active / confirmed / pending /
-          warning lamp). Clearing needs an explicit confirm and the car
-          stationary, then reads back so faults that return straight away
-          show as active. Runs on the existing diagnostic task between live
-          polls (or on its own with live diagnostics off), so the web server
-          never blocks; falls back to the extended session only if the module
-          asks for it.
-V9.14.1 - The car's drivetrain CAN bus never went to sleep with OpenHaldex
-          fitted: the OpenHaldex status frame (0x6B0) was sent on the chassis
-          bus every 200 ms unconditionally - the "Broadcast OpenHaldex over
-          CAN" setting was ignored - so the ECUs kept seeing traffic after
-          locking, the bus stayed busy, and the controller's own low-power
-          sleep never triggered either. It is now sent only when that setting
-          is on, and only while the Haldex side is awake (stops 5 s after it
-          goes quiet).
-V9.14.2 - The web UI is stored gzipped: the LittleFS image is built from
-          gzipped copies of data/ (tools/gzip_webui.py) and the web server
-          serves the .gz files directly, so the UI is byte-for-byte the same
-          but takes 256 KB of flash instead of 469 KB and each page load moves
-          about a quarter of the data over Wi-Fi. version.json stays plain.
-          New docs/diagnostics.md covers the bus monitor, sleep log, fault
-          codes, OTA behaviour and the CAN broadcast setting.
+V11.10.0 - louij2 fork rebased onto upstream V11.00.4 (+ "Gen1 lock tweak").
+          Everything from 11.00.x (OEM-spec lock levers on every generation,
+          Haldex health decode, Follow ABS, drive mode force, Bluetooth,
+          ESP-NOW relay) plus the fork's own features, ported from 9.14.2:
+        - Bus monitor (Diagnostics card, /api/busmon): every CAN ID on each
+          side with rate, counts, payload changes, NEW vs a saved baseline.
+        - Sleep log (/api/buslog): when each side goes quiet, what wakes it,
+          12 h of 2-minute samples. Held off LittleFS during an fs OTA.
+        - Fault codes (Diagnostics card, /api/dtc): read / clear the Haldex
+          DTCs on Gen5 units (50/51/52), clear needs a confirm.
+        - OTA "Release source" set to this fork (UPD_FORK); release tooling,
+          CI and the phone install site carried over.
+        NEW PARTITION LAYOUT (0x1C0000 app slots, 0x70000 LittleFS, as upstream
+        since 9.00.5): moving from fork 9.x needs ONE USB flash. NVS sits at the
+        same offset, so settings and the bus-monitor baseline are kept. After
+        that, phone OTA works as before. 11.00.x changes the 0AY lever, so run
+        Learn again after updating.
 */

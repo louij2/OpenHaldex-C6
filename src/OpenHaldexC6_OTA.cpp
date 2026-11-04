@@ -331,6 +331,17 @@ static void otaSendResult(AsyncWebServerRequest *request, OtaResult &r, const ch
   r.set = false;
 }
 
+// The UI sends the file size as ?size=. An image bigger than the target
+// partition is refused before anything is erased: since the BLE release moved
+// to bigger app slots / a smaller LittleFS, old-layout images (e.g. a 0xB0000
+// littlefs.bin) and new firmware on an old-layout device are both possible.
+static bool otaImageTooBig(AsyncWebServerRequest *request, const esp_partition_t *p, size_t *size) {
+  *size = 0;
+  if (!p || !request->hasParam("size")) return false;
+  *size = (size_t)strtoul(request->getParam("size")->value().c_str(), nullptr, 10);
+  return *size > p->size;
+}
+
 // ============================================================================
 // OTA Update Handler - SAFETY-CRITICAL: Blocks unsafe updates
 // ============================================================================
@@ -342,8 +353,8 @@ void handleOTAUpdate(AsyncWebServerRequest *request, String filename, size_t ind
 
   // SAFETY CHECK at the start only. Writing the inactive slot changes nothing
   // the car sees; what matters is the reboot at the end, which is gated again
-  // in finishFirmwareRequest(). 9.13.0 and earlier re-checked every chunk, so
-  // one flicker of a CAN flag in the car aborted a good upload.
+  // in finishFirmwareRequest(). Re-checking every chunk meant one flicker of a
+  // CAN-derived flag in the car aborted a good upload.
   if (index == 0 && !isSystemSafeForOTA()) {
     otaSetResult(fwResult, 403, "OTA BLOCKED: System not in safe state. Vehicle must be stationary, CAN initialized, outputs safe, no faults.");
     return;
@@ -354,6 +365,12 @@ void handleOTAUpdate(AsyncWebServerRequest *request, String filename, size_t ind
     otaPartition = esp_ota_get_next_update_partition(NULL);
     if (otaPartition == NULL) {
       otaSetResult(fwResult, 500, "OTA ERROR: No OTA partition found. Check partition table.");
+      return;
+    }
+    size_t imgSize;
+    if (otaImageTooBig(request, otaPartition, &imgSize)) {
+      otaSetResult(fwResult, 400, "OTA ERROR: firmware.bin is " + String(imgSize) + " bytes but the app slot holds " +
+                                      String(otaPartition->size) + " - this release needs the new partition table (one USB flash)");
       return;
     }
     OTA_DEBUG("[OTA] Starting firmware update: %s -> %s", filename.c_str(), otaPartition->label);
@@ -457,10 +474,10 @@ void handleFSUpdate(AsyncWebServerRequest *request, String filename, size_t inde
   if (fsResult.set) return; // outcome already decided - drain the rest of the body
 
   // SAFETY CHECK at the start only, before anything is erased. The web UI
-  // partition can't affect the car, and 9.13.0 and earlier re-checked every
-  // chunk: in the car a single flicker of the speed / bus-fault / temp flag
-  // mid-upload hit fsUpdateFail(), which wipes the partition - the phone OTA
-  // then left the unit on the recovery page.
+  // partition can't affect the car, and re-checking every chunk meant that in
+  // the car a single flicker of the speed / bus-fault / temp flag mid-upload
+  // hit fsUpdateFail(), which wipes the partition - a phone OTA then left the
+  // unit on the recovery page.
   if (index == 0 && !isSystemSafeForOTA()) {
     otaSetResult(fsResult, 403, "OTA BLOCKED: System not in safe state."); // nothing written
     return;
@@ -469,6 +486,12 @@ void handleFSUpdate(AsyncWebServerRequest *request, String filename, size_t inde
   // First chunk - begin filesystem update
   if (index == 0) {
     if (Update.isRunning()) Update.abort(); // an earlier upload that never finished
+    size_t imgSize;
+    if (otaImageTooBig(request, fsPartition(), &imgSize)) { // nothing touched yet, UI stays mounted
+      otaSetResult(fsResult, 400, "OTA ERROR: littlefs.bin is " + String(imgSize) + " bytes but the filesystem partition holds " +
+                                      String(fsPartition()->size) + " - image is for a different partition layout");
+      return;
+    }
     otaUpdateInProgress = true;
     OTA_DEBUG("[OTA] Starting filesystem update: %s (%s bytes expected)", filename.c_str(),
           request->hasParam("size") ? request->getParam("size")->value().c_str() : "?");
@@ -582,6 +605,9 @@ void setupOTA() {
     json += "\"chipRevision\":\"" + String(ESP.getChipRevision()) + "\",";
     json += "\"freeHeap\":\"" + String(ESP.getFreeHeap()) + "\",";
     json += "\"flashSize\":\"" + String(ESP.getFlashChipSize() / 1024) + " KB\",";
+    // Partition layout: app slot 0x1A0000 / fs 0xB0000 = before the BLE release, 0x1C0000 / 0x70000 = after
+    json += "\"appSlotSize\":" + String(running ? running->size : 0) + ",";
+    json += "\"fsSize\":" + String(fsPartition() ? fsPartition()->size : 0) + ",";
     if (running != NULL) {
       json += "\"partition\":\"" + String(running->label) + "\",";
       json += "\"appVersion\":\"" + String(app_info.version) + "\",";

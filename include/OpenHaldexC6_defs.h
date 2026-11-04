@@ -16,7 +16,7 @@
 #include <OpenHaldexC6_canID.h>
 #include <OpenHaldexC6_ver.h>
 
-#include "Freenove_WS2812_Lib_for_ESP32.h" // for RGB LED
+#include <OpenHaldexC6_led.h>              // for RGB LED (single WS2812, replaces Freenove lib - see header)
 #include <Preferences.h>                   // for eeprom/remember settings
 
 #include <WiFi.h>    // included for WiFi pages
@@ -48,6 +48,7 @@
 #define detailedDebugIO 0           // set to 1 to enable detailed IO debug messages (only recommended when debugging IO-related issues, as it can be very verbose)
 #define detailedDebugArray 0        // set to 1 to enable detailed debug messages for arrays (like throttle/speed/lock curves) - only recommended when debugging issues related to those, as it can be very verbose
 #define debugCANSleep 0             // set to 1 to skip the 5-min idle/60-s count and sleep after ~2 s with no clients
+#define debugMemory 1               // set to 1 to print heap + every task's unused stack 15 s after boot, then every 60 s
 
 // refresh rates
 #define eepRefresh 2000           // EEPROM save in ms
@@ -57,7 +58,10 @@
 #define updateTriggersRefresh 500 // change IO refresh rate in ms
 
 // debugging macros
-#ifdef enableDebug
+// "#if", not "#ifdef": enableDebug is always defined (as 0 or 1), so "#ifdef" was
+// always true and every DEBUG() message was built in and printed even with it at 0
+// (fixed in V11.00.1 - saves flash and stops the constant serial output)
+#if enableDebug
 #define DEBUG(x, ...) Serial.printf(x "\n", ##__VA_ARGS__)
 #define DEBUG_(x, ...) Serial.printf(x, ##__VA_ARGS__)
 #else
@@ -141,16 +145,7 @@ extern twai_message_t rx_message_chs; // incoming chassis message
 extern twai_message_t tx_message_hdx; // outgoing haldex message
 extern twai_message_t tx_message_chs; // outgoing chassis message
 
-extern TaskHandle_t handle_frames1000;           // for enabling/disabling 1000ms frames
-extern TaskHandle_t handle_frames250;            // for enabling/disabling 250ms frames
-extern TaskHandle_t handle_frames200;            // for enabling/disabling 200ms frames
-extern TaskHandle_t handle_frames100;            // for enabling/disabling 100ms frames
-extern TaskHandle_t handle_frames50;             // for enabling/disabling 50ms frames
-extern TaskHandle_t handle_frames25;             // for enabling/disabling 25ms frames
-extern TaskHandle_t handle_frames20;             // for enabling/disabling 20ms frames
-extern TaskHandle_t handle_frames13;             // for enabling/disabling 13ms frames
-extern TaskHandle_t handle_frames10;             // for enabling/disabling 10ms frames
-extern TaskHandle_t handle_gen41_dual_bus_rates; // dedicated Gen41 dual-bus cadence task
+extern TaskHandle_t handle_standaloneFrames;     // standalone frame scheduler (runs only while standalone)
 extern TaskHandle_t handle_broadcastOpenHaldex;  // OpenHaldex CAN broadcast task (suspended in aggressive sleep)
 extern TaskHandle_t handle_showHaldexState;      // serial state logger (suspended in aggressive sleep)
 extern TaskHandle_t handle_updateTriggers;       // notified by CAN_RX wake ISRs in aggressive sleep
@@ -163,7 +158,7 @@ extern bool isMPH;       // 0 = kph, 1 = mph
 extern Preferences pref; // for EEPROM / storing settings
 
 // for LED
-extern Freenove_ESP32_WS2812 strip; // 1 led, gpio pin, channel, type of LED
+extern OneLed strip; // 1 led, gpio pin, colour order
 
 // for mode changing (buttons & external inputs)
 extern InterruptButton btnMode;     // pin, GPIO_MODE_INPUT, state when pressed, long press, autorepeat, double-click, debounce
@@ -172,12 +167,7 @@ extern InterruptButton btnMode_ext; // pin, GPIO_MODE_INPUT, state when pressed,
 extern AsyncWebServer webServer;
 
 // functions
-void frames10(void *arg);
-void frames20(void *arg);
-void frames25(void *arg);
-void frames100(void *arg);
-void frames200(void *arg);
-void frames1000(void *arg);
+void standaloneFramesTask(void *arg);
 
 void parseCAN_chs(void *arg);
 void parseCAN_hdx(void *arg);
@@ -192,6 +182,12 @@ void setupTasks();
 void updateTriggers(void *arg);
 void modeChange();
 void modeChangeExt();
+
+// Mode / controller changes requested from the web UI or BLE (shared so both
+// apply the same rules). requestMode() returns false when the request was
+// rejected (out of range, or the controller is disabled).
+bool requestMode(uint8_t mode);
+void setControllerDisabled(bool disabled);
 
 extern void getLockData(twai_message_t &rx_message_chs);
 extern uint8_t get_lock_target_adjusted_value(uint8_t value, bool invert);
@@ -270,12 +266,72 @@ extern bool received_awd_warning;
 extern uint8_t received_long_lock_state;
 extern bool received_kickdown;
 
+// ===== Haldex health (V11.00.0) =====
+// What the Haldex itself says about its own health, decoded per generation in
+// parseCAN_hdx() from the OEM code findings (documents/haldex-binaries/
+// CONTROL_AND_DTC_SPEC.md). These are the unit's GENUINE protections - we
+// report them to the driver, we never hide them. Each generation only sets
+// the ones its feedback frame really carries; the rest stay false.
+//   received_report_clutch1   = the unit has a fault present (clutch / pump / valve)
+//   received_report_clutch2   = signal plausibility fault (clutch / sensor)
+//   received_temp_protection  = over-temperature protection active (clutch pulled back)
+//   received_limp_mode        = limp / fault reaction active
+//   received_awd_warning      = AWD warning lamp requested on the cluster
+//   received_coupling_open    = clutch commanded fully open (status only, not a fault)
+extern bool received_temp_sensor_fault; // the unit's own temperature sensor has failed
+extern bool received_fault_stored;      // the unit has stored a fault in its memory (scan it with VCDS / ODIS)
+extern bool haldexHealthSupported;      // true when this generation's feedback carries health bits we decode
+extern bool received_lever_request_valid; // Gen5 0CQ: Allrad_03 (0x118) b1 bit 6 - the unit accepts our ESP_14 request (false = it is running its own strategy)
+
 // values received from Chassis CAN
 extern float received_pedal_value;
 extern uint16_t received_vehicle_speed;
 extern uint16_t received_vehicle_rpm;
+extern bool received_kl15;          // MQB ZAS_Kl_15 (ignition on), from Klemmen_Status_01
+extern uint32_t lastKl15Ms;         // millis() of the last Klemmen_Status_01; 0 = never seen
+bool ignitionOn();                  // KL15 on and fresh; false when unknown
 extern uint16_t received_vehicle_boost;
+extern float receivedCoolantTemp;   // engine coolant temperature in degC, from PQ Kombi_2 (0x420) byte 4 (V11.00.4)
+extern float receivedOilTemp;       // engine oil temperature in degC, from PQ Kombi_2 (0x420) byte 3 (V11.00.4)
+extern uint32_t lastKombi2Ms;       // millis() of the last Kombi_2 frame; 0 = never seen
+#define KOMBI2_TIMEOUT_MS 2000      // no Kombi_2 for this long = temperatures unknown, shown as "--"
 extern uint8_t haldexGeneration;
+
+// ===== Volvo / SAAB Haldex generations (added V10.00.0) =====
+// Our numbering: first digit = Haldex generation, second = which car (as 41 = GM, 42 = Ford).
+#define GEN_VOLVO_P2_GEN2 21 // Volvo P2 pre-facelift (S60/V70/XC70/XC90 to ~2004), Haldex Gen2, CAN at 250 kbit/s
+#define GEN_VOLVO_P2_GEN3 3  // Volvo P2 facelift (S60/S60R/V70/XC70/XC90 2005+), Haldex Gen3, CAN at 500 kbit/s
+#define GEN_VOLVO_GEN4 43    // Volvo Gen4 (P3 XC60/V70/S80, likely also Freelander 2), 11-bit IDs
+#define GEN_SAAB_93_XWD 44   // SAAB 9-3 XWD (GM family), Haldex Gen4
+#define GEN_VOLVO_SPC_GEN5 53 // Volvo Haldex Gen5 "SPC" unit 31380867 (PowerPC, 11-bit IDs, 500 kbit/s assumed) - added V11.00.0 from its OEM code
+#define GEN_VOLVO_P1 31       // Volvo P1 (S40 / V50 AWD 2004-2012), Haldex Gen3, 500 kbit/s, 29-bit IDs - added V11.00.1 from Adam's 2005 V50 T5 AWD logs
+bool isVolvoOrSaabGeneration(uint8_t generation); // true for any of the six above
+
+// ===== Volvo P1 standalone lock (V11.00.1) =====
+// How the lock % is shown to the P1 AWD module in standalone. Set from the
+// Settings page (Volvo P1 Standalone card), saved, and in backups.
+#define VOLVO_P1_SOURCE_TORQUE 0 // engine torque + pedal rise with the lock (like a full-throttle pull - what the module follows in the logs)
+#define VOLVO_P1_SOURCE_SLIP 1   // front wheels run faster than the rears as the lock rises (like wheelspin)
+#define VOLVO_P1_SOURCE_BOTH 2   // both at once
+extern uint8_t volvoP1LockSource;   // setting: one of the three above (default torque)
+extern uint8_t volvoP1RoadSpeedKmh; // setting: road / rear wheel speed sent in standalone, km/h (default 30; the module never locked while stopped)
+extern uint8_t volvoP1Gear;         // setting: gear the engine rpm is worked out for, 1-3 (default 2: 30 km/h = ~2000 rpm)
+extern uint16_t volvoP1TorqueFull;  // setting: engine torque counts above zero sent at 100 % lock (default 600)
+extern uint8_t volvoP1SlipFullKmh;  // setting: how much faster the front wheels run at 100 % lock, km/h (default 10)
+// What standalone sent last and what came back - shown live on the settings card
+extern uint16_t volvoP1SentTorque;      // engine torque counts above zero
+extern uint8_t volvoP1SentPedal;        // pedal byte, 0-255
+extern uint16_t volvoP1SentRpm;         // rpm
+extern uint16_t volvoP1SentFrontRaw;    // front wheel speed, 0.01 km/h
+extern uint16_t volvoP1SentRearRaw;     // rear wheel / road speed, 0.01 km/h
+extern uint16_t volvoP1EngagementCount; // last engagement from 0x1960000A, 0-1023 (540 = full)
+
+// CAN bus speed. Both controllers run at the same speed, picked from the Haldex
+// generation at boot (setupCAN). Changing to/from a generation with a different
+// speed saves the setting and restarts the controller (checkCanSpeedChange).
+extern uint16_t canBusSpeedKbps;                     // speed the CAN controllers were started at (500 or 250)
+uint16_t canSpeedForGeneration(uint8_t generation);  // 250 for Volvo P2 Gen2, otherwise 500
+void checkCanSpeedChange();                          // called from loop(): restart if the generation needs a new speed
 // Steering-wheel angle magnitude (deg, abs) decoded from chassis CAN + last-seen time.
 extern float received_steering_angle;
 extern uint32_t received_steering_ms;
@@ -311,6 +367,7 @@ extern bool followBrake;
 extern bool invertBrake;
 extern bool followHandbrake;
 extern bool invertHandbrake;
+extern bool followABS; // setting: open the clutch while the ABS is braking (default on); off = our lock overrules the ABS
 extern bool tcForceMode;
 extern bool asrForceModeFlag;
 extern bool tcForceModeFlag;
@@ -322,6 +379,26 @@ extern bool paddleTipBoth;
 
 extern bool extBtnForceMode;
 extern bool extButtonForceModeFlag;
+
+// ===== Drive mode select (MQB "Charisma") =====
+// The car's drive mode select (Comfort / Normal / Sport / Race / Individual ...) can force an
+// OpenHaldex mode. Profile numbers are the gateway's own (from the MQB K-matrix + jilleb/MQB-FPA).
+#define DRIVE_PROFILE_COUNT 12     // drive profiles 0-11 (0 = none, 1 Comfort ... 11 Offroad Individual)
+#define DRIVE_MODE_NOT_SET 255     // "N/A" in the drive mode table: this profile doesn't force a mode
+#define DRIVE_MODE_TIMEOUT_MS 3000 // Charisma frames come once a second; after 3 s without one the drive mode is unknown
+#define DRIVE_SOURCE_NONE 0        // no drive mode seen yet
+#define DRIVE_SOURCE_CHARISMA_07 7 // read from Charisma_07 (0x3E8) CHA_Current_Mode: the profile itself
+#define DRIVE_SOURCE_CHARISMA_01 1 // read from Charisma_01 (0x385) engine request: used when 0x3E8 isn't on this bus
+
+extern bool driveModeForce;                                // setting: use the car's drive mode select to force a mode
+extern uint8_t driveModeForceValue[DRIVE_PROFILE_COUNT];   // setting: OpenHaldex mode for each drive profile, or DRIVE_MODE_NOT_SET
+extern uint8_t receivedDriveProfile;                       // runtime: drive profile the car is in (0 = none)
+extern uint8_t driveProfileSource;                         // runtime: which frame it came from (DRIVE_SOURCE_...)
+extern uint32_t lastDriveProfileMs;                        // runtime: when the drive profile was last read
+extern uint32_t lastCharisma07Ms;                          // runtime: when Charisma_07 was last seen (0 = never)
+extern uint8_t receivedHaldexModeRequest;                  // runtime: mode the car's gateway asks the Haldex for (Charisma_01 byte 3 bits 0-3)
+extern uint8_t receivedVaqModeRequest;                     // runtime: mode the car's gateway asks the VAQ for (Charisma_01 byte 4 bits 4-7)
+extern bool hasHaldexModeRequest;                          // runtime: true once a Charisma_01 frame has been read
 
 extern bool disableOnboardButton;
 extern bool disableExternalButton;
@@ -350,13 +427,18 @@ extern int32_t bpkForceSolfNm;
 // Last Motor_11 payload actually transmitted, for telemetry.
 extern volatile uint8_t bpkLastFrame[8];
 
-// Danger Zone: at a full 50:50 request, pin the ESP_14 coupling-range minimum
-// to the maximum so the Haldex is given no room to modulate and drives the pump
-// to full duty. Measured on the bench: ~99% PWM and ~10.5 A, versus ~56% PWM at
-// the same request with this off. Maximum clamping force, but the Haldex's
-// REPORTED engagement reads LOWER (80s rather than ~98%) because its estimate
-// backs off once the pressure relief valve opens. Off by default; persisted.
+// Danger Zone: at a full lock request (50:50, or Expert with lock_target > 99),
+// send Motor_11 in BPK packing with the torque ceiling raised to dangerZoneNm.
+// The 0CQ's pump duty follows the engine torque this frame claims, so the pump
+// goes past its normal ~60 % / 9-10 A and pegs the pressure relief valve.
+// Bench 2026-09-20 (0CQ, BPK): 220 Nm -> 58 % / 9 A; 285 Nm pegs the PRV;
+// 320 Nm -> 90 % / 11.0 A; 400 Nm -> 95 % / 11.5 A. Maximum clamping force,
+// but the Haldex's REPORTED engagement reads LOWER (80s rather than ~98%)
+// because its estimate backs off once the relief valve opens. ESP_14 Min/Max
+// pinning (the original implementation) was measured to do nothing on the 0CQ.
+// Off by default; the toggle is persisted, the Nm value is a lab tunable.
 extern bool dangerZoneEnabled;
+extern uint16_t dangerZoneNm; // 320 - used only when it exceeds bpkCeilingNm
 
 // ---- Serial lab byte overrides ----------------------------------------------
 // Force an individual byte of any generated standalone frame, so each byte's
@@ -367,7 +449,7 @@ extern bool dangerZoneEnabled;
 #define LAB_OVR_MAX 12
 struct LabOverride
 {
-  uint16_t canId;  // 0 = slot unused
+  uint32_t canId;  // 0 = slot unused (32-bit so Volvo's 29-bit IDs fit)
   uint8_t byteIdx; // 0..7
   uint8_t value;
 };
@@ -406,7 +488,8 @@ extern volatile uint16_t bpkLastSolfNm;   // slewed MO_Mom_Soll_gefiltert sent (
 // selected passthrough frames. Each editable frame ("block") can be enabled or
 // disabled at runtime so users can bisect which edited frame upsets the learn
 // procedure. A disabled block leaves the car's real frame untouched (clean
-// passthrough). Only gens 1/2/4/50/51 are gated (gen41/42 are dual-bus and are
+// passthrough). Only gens 1/2/4/50/51 and the Volvo P1 (31, standalone frames
+// only) are gated (gen41/42 are dual-bus and are
 // not handled in normal mode).
 enum
 {
@@ -415,6 +498,8 @@ enum
     FE_GEN_4,
     FE_GEN_50,
     FE_GEN_51,
+    FE_GEN_SPARE_60, // V11.00.1: kept free - V12 puts Gen6 (Magma) here, so saved masks line up when moving to V12
+    FE_GEN_VOLVO_P1, // V11.00.1: Volvo P1 (generation 31) standalone frames
     FE_GEN_COUNT
 };
 
@@ -422,7 +507,7 @@ struct FrameEditBlock
 {
     uint8_t genIdx;   // FE_GEN_*
     uint8_t bit;      // bit position within that generation's mask
-    uint16_t canId;   // CAN identifier of the frame
+    uint32_t canId;   // CAN identifier of the frame (32-bit since V11.00.1 so Volvo's 29-bit IDs fit)
     const char *name; // human-readable frame name (shown in UI)
 };
 
@@ -435,6 +520,7 @@ extern uint64_t frameEditMask[FE_GEN_COUNT];                 // passthrough (nor
 extern uint64_t frameEditMaskSA[FE_GEN_COUNT];               // standalone enable bits per generation
 extern const uint64_t frameEditMaskDefaults[FE_GEN_COUNT];   // normal-mode defaults (historically-edited frames on)
 extern const uint64_t frameEditMaskDefaultsSA[FE_GEN_COUNT]; // standalone defaults (all frames on)
+extern const uint64_t frameEditLockDriven[FE_GEN_COUNT];     // blocks whose payload follows lock_target (Long Learn core)
 extern const FrameEditBlock frameEditBlocks[];            // descriptor table for UI/API
 extern const uint16_t frameEditBlockCount;                // number of entries in frameEditBlocks[]
 int frameEditGenIdx(uint8_t generation);                  // haldexGeneration -> FE_GEN_* (-1 if not gated)
@@ -453,6 +539,10 @@ extern bool canSleepAggressive; // aggressive add-on: transceiver standby + DFS 
 // toggle can't weaken parked-car battery protection once installed. See
 // everSawCANThisSession in OpenHaldexC6_IO.cpp.
 extern bool benchMode;               // persisted (UI/EEP), default off
+
+// Bluetooth LE link to the DashCAN mobile app (see OpenHaldexC6_BLE.cpp).
+extern bool bleEnabled;      // persisted (UI/EEP), default on
+extern uint32_t blePasskey;  // 6-digit pairing code, required once a phone is bonded; random, persisted, never in backups
 extern volatile bool canWakeRequest; // set by CAN_RX GPIO ISR when transceivers in standby see bus activity
 
 extern bool rebootWiFi;
@@ -471,6 +561,7 @@ extern bool handbrakeSignalActive;
 
 extern bool brakeFromCAN;
 extern bool handbrakeFromCAN;
+extern bool absBrakingFromCAN; // the ABS module says it is braking (PQ Bremse_1 b0.2 / MQB ESP_21 b7.0) - the Haldex opens the clutch for this
 
 extern bool otaUpdate;
 
@@ -496,6 +587,17 @@ extern bool analyzerSerial; // Serial GVRET (1 Mbaud, SavvyCAN serial connection
 // Default 1100 fps on chassis bus; Standalone uses a hardcoded 50 fps threshold.
 // Frames required = lpWakeThresholdFps * lowPowerProbeMs / 1000
 extern uint16_t lpWakeThresholdFps; // runtime wake threshold (fps), adjustable via UI
+
+// One-shot sleep auto-setup (offered for Gen5): measure the parked chassis bus
+// for 15 min, then wake threshold = average + SLEEP_CAL_MARGIN_FPS.
+#define SLEEP_CAL_NONE 0     // never offered
+#define SLEEP_CAL_ARMED 1    // waiting for the car to be left parked
+#define SLEEP_CAL_DONE 2     // measured; threshold set
+#define SLEEP_CAL_DECLINED 3 // user said no; don't ask again
+#define SLEEP_CAL_WINDOW_S 900
+#define SLEEP_CAL_MARGIN_FPS 300
+extern uint8_t sleepCalState;    // persisted
+extern uint16_t sleepCalAvgFps;  // parked-bus average measured by the auto-setup (persisted, for display)
 
 // Analyzer protocol for the TCP bridge (GVRET for SavvyCAN, Lawicel/SLCAN for CANHacker).
 #define ANALYZER_PROTOCOL_GVRET 0
@@ -596,6 +698,7 @@ extern float udsClutchCurrent;   // 0x2BE6: BE16 × 0.001 A
 extern uint8_t udsClutchPWM;     // 0x2BE7: raw % (1 byte, 0–100)
 extern float udsClutchVoltage;   // 0x2BE9: BE16 × 0.001 V
 extern uint8_t udsBlockagePct;   // unconfirmed DID — always 0
+extern volatile uint32_t udsLastDecodeMs; // millis() of the last decoded UDS value (0 = none); freshness for BLE Diag
 
 // --- KWP2000 over VW TP2.0 diagnostics: Gen2 / Gen4 (PQ) Haldex ------------
 // The PQ-platform AWD/Haldex controller is diagnosed with KWP2000 tunnelled
@@ -644,29 +747,19 @@ extern uint8_t disableThrottle;
 extern uint16_t disengageUnderSpeed;
 extern uint16_t disengageAboveSpeed;
 
-// Reasons lock can be withheld by the speed/throttle window. Reported on
-// /api/dashboard so a "Requested 0%" reading is diagnosable rather than
-// mysterious: from 9.00.0 these gates apply to EVERY lock path including the
-// force-mode triggers and Expert, which previously bypassed them, so a saved
-// non-zero setting can silently zero lock in every mode.
-#define LOCK_GATE_THROTTLE 0x01    // throttle below "Minimum Throttle Before Lock"
-#define LOCK_GATE_UNDER_SPEED 0x02 // speed below "Disengage Under Speed"
-#define LOCK_GATE_ABOVE_SPEED 0x04 // speed above "Disengage Above Speed"
-uint8_t lock_gate_blocking();      // LOCK_GATE_* bits currently blocking; 0 = none
+// Which speed / throttle setting is holding lock at 0% (bits, can be several at
+// once). Sent on the dashboard so the web page can say why, instead of a bare
+// "Target: 0%". See lock_gate_blocking() in OpenHaldexC6_Calculations.cpp.
+#define LOCK_GATE_THROTTLE 0x01    // bit 0: throttle below "Minimum Throttle Before Lock"
+#define LOCK_GATE_UNDER_SPEED 0x02 // bit 1: speed below "Disengage Under Speed"
+#define LOCK_GATE_ABOVE_SPEED 0x04 // bit 2: speed above "Disengage Above Speed"
+#define LOCK_GATE_HANDBRAKE 0x08   // bit 3: handbrake pulled with "Follow Handbrake" on (V11.00.0)
+#define LOCK_GATE_ABS 0x10         // bit 4: ABS is braking with "Follow ABS" on - the Haldex's own safety release (V11.00.0)
 
 extern uint32_t rxtxcount; // frame counter
 extern uint32_t stackCHS;
 extern uint32_t stackHDX;
 
-extern uint32_t stackframes10;
-extern uint32_t stackframes13;
-extern uint32_t stackframes20;
-extern uint32_t stackframes25;
-extern uint32_t stackframes50;
-extern uint32_t stackframes100;
-extern uint32_t stackframes200;
-extern uint32_t stackframes250;
-extern uint32_t stackframes1000;
 
 extern uint32_t stackbroadcastOpenHaldex;
 extern uint32_t stackupdateLabels;
@@ -771,6 +864,14 @@ extern uint8_t gen42_090_nibble;     // 4-bit (0-15): 0x090 D1 high nibble
 extern uint8_t gen42_20F_d6;         // 0x20F D6 (+0x10 per frame, mod 256)
 extern uint8_t gen42_190_counter;    // 4-bit (0-15): 0x190 D6
 extern uint8_t gen42_275_counter;    // 0x275 D1 (+0x20 per 100 ms, mod 256)
+
+// Volvo / SAAB standalone counters and heartbeats (V10.00.0)
+extern bool volvoHeartbeatFlip;     // Volvo 100 ms network frame: bytes 6-7 swap to their opposite each send
+extern uint8_t saab140Counter;      // SAAB 0x140 byte 0 bits 0-1: 2-bit rolling counter
+extern uint8_t saab160Step;         // SAAB 0x160 bytes 2/3: which of the 4 counter/protection pairs is next
+
+// Volvo / SAAB Haldex feedback (V10.00.0, provisional until logs confirm the scaling)
+extern int16_t received_haldex_temp_c; // Haldex temperature in degC (SAAB 0x210 b2 - 40, VAG Gen4/0AY 0x2C0 b4 - 60); -128 = not received
 
 // Secondary Axle Torque Request to encode into 0x1CE (Nm, 0 = no request).
 // 4 Nm/LSB empirical scaling; set via API or mode handler.

@@ -29,7 +29,8 @@
 //   CF <0..100>         drive the raw lock request directly (learn-style),
 //                       bypassing mode/lock_target - the lever for sweeps
 //   CF OFF              release the direct request, back to normal control
-//   GEN <n>             haldexGeneration live (1,2,4,41,50,51,52) - not persisted
+//   GEN <n>             haldexGeneration live (1,2,3,4,21,41,42,43,44,50,51,52) - not persisted
+//                       (except to/from 21, which needs 250 kbit/s: saved + restart)
 //   SA <0|1>            isStandalone live (frame tasks resumed/suspended) - not persisted
 //   RXIDS / RXCLR       census of every CAN ID seen on Bus 1 (what the module sends)
 //   DIAGID <req> <rsp>  pin the UDS request/response pair (hex); DIAGID AUTO = by generation
@@ -376,19 +377,13 @@ static void labUdsRawCmd(const uint8_t *req, size_t reqLen, uint32_t timeoutMs)
 static void labSetStandalone(bool on)
 {
   isStandalone = on;
-  // Mirror /api/settings: the frame tasks only run while standalone.
-  TaskHandle_t hs[] = {handle_frames1000, handle_frames200, handle_frames100, handle_frames25,
-                       handle_frames20, handle_frames10, handle_frames13, handle_frames50,
-                       handle_frames250, handle_gen41_dual_bus_rates};
-  for (TaskHandle_t h : hs)
-  {
-    if (h == nullptr)
-      continue;
-    if (on)
-      vTaskResume(h);
-    else
-      vTaskSuspend(h);
-  }
+  // Mirror /api/settings: the frame task only runs while standalone.
+  if (handle_standaloneFrames == nullptr)
+    return;
+  if (on)
+    vTaskResume(handle_standaloneFrames);
+  else
+    vTaskSuspend(handle_standaloneFrames);
 }
 
 // Direct lock request. Piggybacks the learn plumbing (haldexLearnActive makes
@@ -738,6 +733,13 @@ static void labHandleLine(char *line)
     dangerZoneEnabled = (v != 0);
     Serial.printf("OK,DANGER,%u\n", (unsigned)(dangerZoneEnabled ? 1 : 0));
   }
+  else if (strcmp(line, "DANGERNM") == 0)
+  {
+    // Motor_11 BPK ceiling applied while Danger Zone is live (same range as CEIL).
+    if (!labArgInt(arg, v)) { Serial.println("ERR,DANGERNM needs Nm"); return; }
+    dangerZoneNm = (uint16_t)constrain(v, 10, 500);
+    Serial.printf("OK,DANGERNM,%u\n", (unsigned)dangerZoneNm);
+  }
   else if (strcmp(line, "UDS") == 0)
   {
     if (!labArgInt(arg, v)) { Serial.println("ERR,UDS needs 0|1"); return; }
@@ -787,7 +789,7 @@ static void labHandleLine(char *line)
     char *a3 = a2; while (*a3 && *a3 != ' ') a3++;
     if (*a3 != ' ') { Serial.println("ERR,OVR needs <hexid> <byte> <val|AUTO>"); return; }
     *a3++ = '\0';
-    const uint16_t id = (uint16_t)strtol(arg, nullptr, 16);
+    const uint32_t id = (uint32_t)strtoul(arg, nullptr, 16); // 32-bit: Volvo IDs are 29-bit
     const uint8_t bi = (uint8_t)atoi(a2);
     if (bi > 7) { Serial.println("ERR,OVR byte must be 0..7"); return; }
     const bool clear = (strncasecmp(a3, "AUTO", 4) == 0);
@@ -798,7 +800,7 @@ static void labHandleLine(char *line)
     if (clear)
     {
       if (slot >= 0) labOverrides[slot].canId = 0;
-      Serial.printf("OK,OVR,%03X,%u,AUTO\n", id, bi);
+      Serial.printf("OK,OVR,%03lX,%u,AUTO\n", (unsigned long)id, bi);
       return;
     }
     if (slot < 0)
@@ -808,7 +810,7 @@ static void labHandleLine(char *line)
     labOverrides[slot].canId = id;
     labOverrides[slot].byteIdx = bi;
     labOverrides[slot].value = (uint8_t)strtol(a3, nullptr, 0);
-    Serial.printf("OK,OVR,%03X,%u,0x%02X\n", id, bi, labOverrides[slot].value);
+    Serial.printf("OK,OVR,%03lX,%u,0x%02X\n", (unsigned long)id, bi, labOverrides[slot].value);
   }
   else if (strcmp(line, "OVRCLR") == 0)
   {
@@ -819,7 +821,7 @@ static void labHandleLine(char *line)
   {
     for (uint8_t i = 0; i < LAB_OVR_MAX; i++)
       if (labOverrides[i].canId)
-        Serial.printf("OVRS,%03X,%u,0x%02X\n", labOverrides[i].canId,
+        Serial.printf("OVRS,%03lX,%u,0x%02X\n", (unsigned long)labOverrides[i].canId,
                       labOverrides[i].byteIdx, labOverrides[i].value);
     Serial.println("OK,OVRS");
   }
@@ -839,8 +841,10 @@ static void labHandleLine(char *line)
                     (unsigned long)udsHaldexReqId, (unsigned long)udsHaldexRespId);
       return;
     }
-    if (!(v == 1 || v == 2 || v == 4 || v == 41 || v == 42 || v == 50 || v == 51 || v == 52))
+    if (!(v == 1 || v == 2 || v == 4 || v == 41 || v == 42 || v == 50 || v == 51 || v == 52 || isVolvoOrSaabGeneration((uint8_t)v)))
     { Serial.println("ERR,GEN unsupported generation"); return; }
+    // Note: moving to/from 21 (Volvo P2 Gen2, 250 kbit/s) saves the generation and
+    // restarts the controller ~2 s later, so unlike the others it does persist.
     haldexGeneration = (uint8_t)v;
     udsApplyDefaultIds();
     Serial.printf("OK,GEN,%u,DIAGID,%03lX,%03lX\n", (unsigned)haldexGeneration,
@@ -944,7 +948,7 @@ static void labHandleLine(char *line)
   {
     Serial.println("OK,HELP,PING GET LOG CEIL FLOOR FIXHUNT QBIT MODE CF"
                    " BPKFLOOR SLEWIST SLEWSOLF TRAEG SCHUB STATUS FORCEIST FORCESOLF"
-                   " WSFREEZE WSBASE WSDITHER WSFRONT WSLR UDS BLOCKS BLOCK OVR OVRS OVRCLR DANGER"
+                   " WSFREEZE WSBASE WSDITHER WSFRONT WSLR UDS BLOCKS BLOCK OVR OVRS OVRCLR DANGER DANGERNM"
                    " GEN SA RXIDS RXCLR DIAGID UDSRAW DTC DTCCLR SESS TP TXADD TXDEL TXCLR TXS HELP");
   }
   else

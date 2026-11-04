@@ -11,16 +11,7 @@ twai_message_t rx_message_chs; // incoming chassis message
 twai_message_t tx_message_hdx; // outgoing haldex message
 twai_message_t tx_message_chs; // outgoing chassis message
 
-TaskHandle_t handle_frames1000; // for enabling/disabling 1000ms frames
-TaskHandle_t handle_frames250;  // for enabling/disabling 250ms frames
-TaskHandle_t handle_frames200;  // for enabling/disabling 200ms frames
-TaskHandle_t handle_frames100;  // for enabling/disabling 100ms frames
-TaskHandle_t handle_frames50;   // for enabling/disabling 50ms frames
-TaskHandle_t handle_frames25;   // for enabling/disabling 25ms frames
-TaskHandle_t handle_frames20;   // for enabling/disabling 20ms frames
-TaskHandle_t handle_frames13;   // for enabling/disabling 13ms frames
-TaskHandle_t handle_frames10;   // for enabling/disabling 10ms frames
-TaskHandle_t handle_gen41_dual_bus_rates; // dedicated Gen41 dual-bus cadence task
+TaskHandle_t handle_standaloneFrames = nullptr; // standalone frame scheduler (runs only while standalone)
 TaskHandle_t handle_broadcastOpenHaldex = nullptr; // OpenHaldex CAN broadcast task (suspended in aggressive sleep)
 TaskHandle_t handle_showHaldexState     = nullptr; // serial state logger (suspended in aggressive sleep)
 TaskHandle_t handle_updateTriggers      = nullptr; // notified by CAN_RX wake ISRs in aggressive sleep
@@ -29,7 +20,7 @@ TaskHandle_t handle_updateTriggers      = nullptr; // notified by CAN_RX wake IS
 Preferences pref; // for EEPROM / storing settings
 
 // for LED - will be initialized in setupIO()
-Freenove_ESP32_WS2812 strip = Freenove_ESP32_WS2812(1, gpio_led, led_channel, TYPE_RGB); // 1 led, gpio pin, channel, type of LED
+OneLed strip(gpio_led, LED_COLOR_ORDER_RGB); // 1 led, gpio pin, colour order (was Freenove TYPE_RGB)
 
 // for mode changing (buttons & external inputs) - will be initialized in setupButtons()
 InterruptButton btnMode(gpio_mode, HIGH, GPIO_MODE_INPUT, 1000, 500, 750, 80000);         // pin, GPIO_MODE_INPUT, state when pressed, long press, autorepeat, double-click, debounce
@@ -69,8 +60,14 @@ bool received_coupling_open;
 bool received_speed_limit;
 bool received_limp_mode;                // Gen1/2/4: Allrad_1 byte 0 bit 4 (Notlauf - limp mode)
 bool received_awd_warning;             // Gen1/2/4: Allrad_1 byte 0 bit 5 (Allrad_Warnlampe - AWD warning lamp)
-uint8_t received_long_lock_state = 0;  // Gen5: ALR_Sta_Laengssperre byte 1 bits 4..5
+uint8_t received_long_lock_state = 0;  // Gen5: 0x118 byte 1 bits 4..5 (0 = normal, 2 = fault reaction / clutch released; 0CQ OEM code never sends 1 or 3). VAQ: QUER_Sta 0..7
 bool received_kickdown = false;
+
+// Haldex health (V11.00.0) - see the "Haldex health" notes in _defs.h
+bool received_temp_sensor_fault = false; // the unit's own temperature sensor has failed (Gen4/0AY 0x2C0 b3.3)
+bool received_fault_stored = false;      // the unit has a fault stored in its memory (Gen4/0AY 0x2C0 b3.7)
+bool haldexHealthSupported = false;      // set by the feedback decode when this generation's health bits are known
+bool received_lever_request_valid = false; // Gen5 0CQ: 0x118 b1 bit 6 = the unit accepts the ESP_14 request (OEM code: spec_gen5_0cq §6)
 
 // values received from Chassis CAN
 float received_pedal_value = 0;
@@ -90,7 +87,19 @@ uint16_t slipTrackFrontMm = 1572;          // front track
 uint16_t slipTrackRearMm = 1543;           // rear track
 uint16_t slipMinSpeedRaw = 667;            // ~5 km/h floor below which slip is untrustworthy
 uint16_t received_vehicle_rpm;
+bool received_kl15 = false;
+uint32_t lastKl15Ms = 0;
+
+// Klemmen_Status_01 is sent every 100 ms and stops when the bus sleeps,
+// so an old value means "unknown", not "on".
+bool ignitionOn()
+{
+  return lastKl15Ms != 0 && (millis() - lastKl15Ms) < 2000UL && received_kl15;
+}
 uint16_t received_vehicle_boost;
+float receivedCoolantTemp = 0.0f; // engine coolant temperature (degC), from PQ Kombi_2
+float receivedOilTemp = 0.0f;     // engine oil temperature (degC), from PQ Kombi_2
+uint32_t lastKombi2Ms = 0;        // when the last Kombi_2 came in; 0 = never
 uint8_t haldexGeneration;
 uint8_t tcForceModeValue     = 2; // default 50:50
 uint8_t hazardForceModeValue = 2; // default 50:50
@@ -111,6 +120,20 @@ bool disableController = false;
 bool followBrake = false;
 bool invertBrake = false;
 bool followHandbrake = false;
+bool followABS = true; // V11.00.0: open the clutch while the ABS is braking (the Haldex's own safety); off = our lock overrules the ABS
+
+// Volvo P1 standalone lock settings (V11.00.1) - see defs.h
+uint8_t volvoP1LockSource = VOLVO_P1_SOURCE_TORQUE; // lock shown as engine torque (what the module follows in the logs)
+uint8_t volvoP1RoadSpeedKmh = 30;                   // standalone road speed, km/h
+uint8_t volvoP1Gear = 2;                            // standalone gear for the rpm, 1-3 (2nd: 30 km/h = ~2000 rpm)
+uint16_t volvoP1TorqueFull = 600;                   // torque counts at 100 % lock (most seen on full-throttle launches)
+uint8_t volvoP1SlipFullKmh = 10;                    // front wheels this much faster at 100 % lock, km/h (the wheelspin log had ~10)
+uint16_t volvoP1SentTorque = 0;                     // last torque sent
+uint8_t volvoP1SentPedal = 0;                       // last pedal byte sent
+uint16_t volvoP1SentRpm = 0;                        // last rpm sent
+uint16_t volvoP1SentFrontRaw = 0;                   // last front wheel speed sent, 0.01 km/h
+uint16_t volvoP1SentRearRaw = 0;                    // last rear wheel speed sent, 0.01 km/h
+uint16_t volvoP1EngagementCount = 0;                // last 0x1960000A engagement count
 bool invertHandbrake = false;
 
 bool rebootWiFi = false;
@@ -137,6 +160,7 @@ bool handbrakeSignalActive = false;
 
 bool brakeFromCAN = false;
 bool handbrakeFromCAN = false;
+bool absBrakingFromCAN = false; // ABS module is braking (PQ Bremse_1 b0.2, MQB ESP_21 b7.0); cleared when the chassis bus goes quiet
 
 bool tcForceMode = false;
 bool tcForceModeFlag = false;
@@ -149,6 +173,31 @@ bool paddleTipBoth   = false;
 
 bool extBtnForceMode = false;
 bool extButtonForceModeFlag = false;
+
+// Drive mode select (MQB "Charisma"): which OpenHaldex mode each drive profile forces.
+// 0 Stock, 1 FWD, 2 50:50, 3 60:40, 4 75:25, 5 Expert, DRIVE_MODE_NOT_SET = leave the mode alone.
+bool driveModeForce = false; // setting: off until the user turns it on
+uint8_t driveModeForceValue[DRIVE_PROFILE_COUNT] = {
+    DRIVE_MODE_NOT_SET, // 0  none
+    MODE_STOCK,         // 1  Comfort    -> Stock
+    DRIVE_MODE_NOT_SET, // 2  Normal
+    MODE_6040,          // 3  Sport      -> 60:40
+    DRIVE_MODE_NOT_SET, // 4  Offroad
+    DRIVE_MODE_NOT_SET, // 5  Eco
+    MODE_5050,          // 6  Race       -> 50:50
+    MODE_EXPERT,        // 7  Individual -> Expert
+    DRIVE_MODE_NOT_SET, // 8  Range / PHEV 1
+    DRIVE_MODE_NOT_SET, // 9  Lift / PHEV 2
+    DRIVE_MODE_NOT_SET, // 10 Snow / PHEV 3
+    DRIVE_MODE_NOT_SET, // 11 Offroad Individual / PHEV 4
+};
+uint8_t receivedDriveProfile = 0;               // drive profile the car is in (0 = none)
+uint8_t driveProfileSource = DRIVE_SOURCE_NONE; // which frame the profile came from
+uint32_t lastDriveProfileMs = 0;                // when the profile was last read
+uint32_t lastCharisma07Ms = 0;                  // when Charisma_07 was last seen (0 = never)
+uint8_t receivedHaldexModeRequest = 0;          // mode the car's gateway asks the Haldex for
+uint8_t receivedVaqModeRequest = 0;             // mode the car's gateway asks the VAQ for
+bool hasHaldexModeRequest = false;              // true once a Charisma_01 frame has been read
 
 bool disableOnboardButton = false;
 bool disableExternalButton = false;
@@ -170,6 +219,7 @@ int32_t bpkForceSolfNm = -1;
 volatile uint8_t bpkLastFrame[8] = {0};
 
 bool dangerZoneEnabled = false; // full-duty 50:50 (see defs.h) - off by default
+uint16_t dangerZoneNm = 320;    // Motor_11 BPK ceiling used while Danger Zone is live (bench: 285 pegs the PRV, 320 -> 90 % / 11 A)
 
 LabOverride labOverrides[LAB_OVR_MAX] = {};
 
@@ -188,31 +238,53 @@ volatile uint16_t bpkLastSolfNm = 0;
 // Bit layout per generation matches the order the cases appear in getLockData().
 // Defaults: currently-active (compiled) frames ON; frames transferred from
 // standalone / previously commented-out are OFF (=> clean passthrough).
+// V11.00.0 (Adam): in every non-Stock mode the job is to ACHIEVE the lock %.
+// V11.00.0 cut the OEM defaults to the lever + wheel-speed blocks on the OEM-code
+// spec's word, letting the car's brake bits through. V11.00.4: that cost lock on a
+// real Gen1 (~42 %, ~11 % on the brake pedal), so every block V10 had ON by default
+// is ON again, plus V11's lever blocks. Stock = untouched passthrough, always.
 const uint64_t frameEditMaskDefaults[FE_GEN_COUNT] = {
-    0x0000000FULL, // FE_GEN_1 : bits 0-3 on   (4 active frames)
-    0x0000001FULL, // FE_GEN_2 : bits 0-4 on   (5 active), bits 5-9 off (added)
-    0x0000003FULL, // FE_GEN_4 : bits 0-5 on   (6 active), bits 6-11 off (added)
-    0x000000FFULL, // FE_GEN_50: bits 0-7 on   (8 active), bits 8-27 off (Motor_14/ESP_07 opt-in)
-    0x0000000FULL, // FE_GEN_51: bits 0-3 on   (4 active), bits 4-17 off (uncommented)
+    0x0000001FULL, // FE_GEN_1 : Motor_1 (0, demand), Motor_3 (1), Bremse_1 (2, brake bits cleared as V10), Bremse_3 (3, wheel speeds), Bremse_4 (4, ceiling lever - only edited when the car sends 0x2A0). V11.00.4: Motor_3 + Bremse_1 back on as V10 (0x19 capped a parked Gen1 at ~42 %)
+    0x0000003FULL, // FE_GEN_2 : Motor_1 (0, demand), Motor_3 (1), Bremse_1 (2, V10 edit), Bremse_2 (3), Bremse_3 (4, wheel speeds), Bremse_4 (5, the lever). V11.00.4: V10's blocks back on (V11.00.0 had 0x31)
+    0x0000003FULL, // FE_GEN_4 : LW_1 (0), Motor_1 (1, lock-scaled), Bremse_1 (2, V10 edit), Bremse_2 (3), Bremse_3 (4, wheel speeds), Bremse_4 (5, the lever). V11.00.4: V10's blocks back on (V11.00.0 had 0x32)
+    0x000000FFULL, // FE_GEN_50: ESP_19 (0, wheel speeds), Getriebe_11 (1), Motor_12 (2), Motor_11 (3), ESP_14 (4, the lever Min = Max = V), ESP_10 (5), ESP_05 (6, V10 'not braking'), EPB_01 (7). V11.00.4: V10's blocks back on (V11.00.0 had 0x1D). Also gen 52 (VAQ), whose Motor_12 still follows lock
+    0x0000000FULL, // FE_GEN_51: Motor_1 (0, V10 lock-scaled demand), Bremse_3 (1, wheel speeds), Bremse_4 (2, the lever), LW_1 (3). V11.00.4: V10's blocks back on (V11.00.0 had 0x06)
+    0x000000FFULL, // FE_GEN_SPARE_60: not used in V11 - V12's Gen6 (Magma) default, so a mask saved here reads right after moving to V12
+    0x00000000ULL, // FE_GEN_VOLVO_P1: nothing edited in OEM mode yet (V11.00.1: OEM mode is untouched passthrough for the P1)
 };
 
 uint64_t frameEditMask[FE_GEN_COUNT] = {
-    0x0000000FULL, 0x0000001FULL, 0x0000003FULL, 0x000000FFULL, 0x0000000FULL};
+    0x0000001FULL, 0x0000003FULL, 0x0000003FULL, 0x000000FFULL, 0x0000000FULL, 0x000000FFULL, 0x00000000ULL};
 
 // Standalone frame-edit defaults: EVERYTHING on. In standalone the module
 // synthesises the whole bus, so all editable frames must be generated by
 // default (the passthrough defaults above only enable the historically-edited
 // subset). A separate mask keeps the two modes fully independent.
 const uint64_t frameEditMaskDefaultsSA[FE_GEN_COUNT] = {
-    0x0000000FULL, // FE_GEN_1 : bits 0-3   (4 blocks)  all on
-    0x00001FFFULL, // FE_GEN_2 : bits 0-12  (13 blocks) all on
-    0x00000FFFULL, // FE_GEN_4 : bits 0-11  (12 blocks) all on
-    0x0FFFFFFFULL, // FE_GEN_50: bits 0-27  (28 blocks) all on
-    0x0003FFFFULL, // FE_GEN_51: bits 0-17  (18 blocks) all on
+    0x0000003DULL, // FE_GEN_1 : Motor_1, Bremse_1, Bremse_3, Bremse_4, Motor_2 (V11 spec_gen1_02d §5; Motor_3 + Kombi_1 off)
+    0x00001E7DULL, // FE_GEN_2 : V11 - all on except Motor_3 (1), Bremse_9 (7), Bremse_10 (8): not received by 7H0/1K0 (OEM code: spec_gen2_7h0 §5, was 0x1FFF)
+    0x0001F9FFULL, // FE_GEN_4 : V11 - bits 0-8, 11, 12-16 on; Bremse_11 (9) + Kombi_2 (10) off - Gen4 does not read them (OEM code: spec_gen4_0br §5, was 0xFFF)
+    0x0FFFFFFFULL, // FE_GEN_50: bits 0-27 all on. The 0CQ alone only needs 0x0FE0FB5F (ESP_10 (5), EPB_01 (7), ESP_18 (10), bits 16-20 not received - spec_gen5_0cq §5) and ignores the rest, but gen 52 VAQ shares this mask and its receive set is not traced, so its bench-proven frames stay on (V11.00.0)
+    0x0006BF7FULL, // FE_GEN_51: V11 - bits 0-6, 8-13, 15, 17, 18 (Getriebe_1) on; Bremse_8 (7), Bremse_11 (14), Kombi_2 (16) off - not received by the 0AY (OEM code: spec_gen5_0ay §5, was 0x3FFFF)
+    0x1FFFFFFFFFULL, // FE_GEN_SPARE_60: not used in V11 - V12's Gen6 (Magma) standalone default (bits 0-36 on)
+    0x003FFFFFULL,   // FE_GEN_VOLVO_P1: all 22 car frames on (bits 0-21) - turn off the ones the AWD module turns out not to need
 };
 
 uint64_t frameEditMaskSA[FE_GEN_COUNT] = {
-    0x0000000FULL, 0x00001FFFULL, 0x00000FFFULL, 0x0FFFFFFFULL, 0x0003FFFFULL};
+    0x0000003DULL, 0x00001E7DULL, 0x0001F9FFULL, 0x0FFFFFFFULL, 0x0006BF7FULL, 0x1FFFFFFFFFULL, 0x003FFFFFULL};
+
+// Blocks whose payload is built from lock_target (get_lock_target_adjusted_value)
+// - the ones we MUST edit to have control. Long Learn always sends these and
+// only tests the rest (the static payloads). Keep in step with getLockData().
+const uint64_t frameEditLockDriven[FE_GEN_COUNT] = {
+    0x0000001DULL, // FE_GEN_1 : Motor_1, Bremse_1, Bremse_3, Bremse_4 (V11.00.4: Bremse_1 must be edited - the car's brake bits cut the lock)
+    0x00000035ULL, // FE_GEN_2 : Motor_1 (demand), Bremse_1 (V11.00.4: the car's brake bits must not reach the unit), Bremse_3 (slip), Bremse_4 (the lever)
+    0x00000036ULL, // FE_GEN_4 : Motor_1 (lock-scaled), Bremse_1 (V11.00.4: the car's brake bits must not reach the unit), Bremse_3 (wheel speeds), Bremse_4 (the lever)
+    0x0000005DULL, // FE_GEN_50: ESP_19 (wheel speeds), Motor_12, Motor_11, ESP_14 (the lever), ESP_05 (V11.00.4: the car's brake pressure must not reach the unit) - Motor_12 still follows lock on the VAQ
+    0x00000007ULL, // FE_GEN_51: Motor_1 (V11.00.4: V10 lock-scaled demand back), Bremse_3 (wheel speeds), Bremse_4 (the lever)
+    0x1000001DULL, // FE_GEN_SPARE_60: not used in V11 - V12's Gen6 value
+    0x00000003ULL, // FE_GEN_VOLVO_P1: engine torque + pedal (0, 0x0300410E) and RPM (1, 0x0090411E) follow the lock
+};
 
 // Descriptor table used by the API/UI. Order per generation defines the bit index.
 const FrameEditBlock frameEditBlocks[] = {
@@ -221,6 +293,9 @@ const FrameEditBlock frameEditBlocks[] = {
     {FE_GEN_1, 1, MOTOR3_ID, "Motor_3 (0x380)"},
     {FE_GEN_1, 2, BRAKES1_ID, "Bremse_1 (0x1A0)"},
     {FE_GEN_1, 3, BRAKES3_ID, "Bremse_3 (0x4A0)"},
+    {FE_GEN_1, 4, BRAKES4_ID, "Bremse_4 (0x2A0)"}, // V11: torque-ceiling lock lever (spec_gen1_02d §2.3)
+    {FE_GEN_1, 5, MOTOR2_ID, "Motor_2 (0x288)"},   // V11: standalone only - the 02D needs it for "all inputs valid"
+    {FE_GEN_1, 6, mKombi_1, "Kombi_1 (0x320)"},    // V11: standalone handbrake (off by default: the 02D's own handbrake wire is used)
     // Gen2
     {FE_GEN_2, 0, MOTOR1_ID, "Motor_1 (0x280)"},
     {FE_GEN_2, 1, MOTOR3_ID, "Motor_3 (0x380)"},
@@ -248,6 +323,13 @@ const FrameEditBlock frameEditBlocks[] = {
     {FE_GEN_4, 9, BRAKES11_ID, "Bremse_11 (0x5B7)"},
     {FE_GEN_4, 10, mKombi_2, "Kombi_2 (0x420)"},
     {FE_GEN_4, 11, mDiagnose_1, "Diagnose_1 (0x7D0)"},
+    // Gen4 V11.00.0: frames the 0BR monitors that we never sent (OEM code: spec_gen4_0br §3).
+    // Standalone builds them (Gen4_frames20); in OEM mode the car's own frame always passes through.
+    {FE_GEN_4, 12, MOTOR2_ID, "Motor_2 (0x288)"},      // brake light b2.0, max torque mux
+    {FE_GEN_4, 13, MOTOR5_ID, "Motor_5 (0x480)"},      // missing = unit sets its own limp bit
+    {FE_GEN_4, 14, BRAKES5_ID, "Bremse_5 (0x4A8)"},    // yaw rate
+    {FE_GEN_4, 15, BRAKES8_ID, "Bremse_8 (0x1AC)"},    // ESP status / counter
+    {FE_GEN_4, 16, mGetriebe_1, "Getriebe_1 (0x440)"}, // gear / torque ratio
     // Gen50 (0CQ MQB)
     {FE_GEN_50, 0, ESP_19, "ESP_19 (0x0B2)"},
     {FE_GEN_50, 1, GETRIEBE_11, "Getriebe_11 (0x0AD)"},
@@ -277,7 +359,7 @@ const FrameEditBlock frameEditBlocks[] = {
     {FE_GEN_50, 25, ESP_20, "ESP_20 (0x65D)"},
     {FE_GEN_50, 26, DIAGNOSE_01, "Diagnose_01 (0x6B2)"},
     {FE_GEN_50, 27, KOMBI_02, "Kombi_02 (0x6B7)"},
-    // Gen51 (0AY MQB)
+    // Gen51 (0AY - a PQ unit: PQ frame set, Bremse_4 lever, Allrad_1 0x2C0 feedback - spec_gen5_0ay §1)
     {FE_GEN_51, 0, MOTOR1_ID, "Motor_1 (0x280)"},
     {FE_GEN_51, 1, BRAKES3_ID, "Bremse_3 (0x4A0)"},
     {FE_GEN_51, 2, BRAKES4_ID, "Bremse_4 (0x2A0)"},
@@ -296,6 +378,34 @@ const FrameEditBlock frameEditBlocks[] = {
     {FE_GEN_51, 15, mSysteminfo_1, "Systeminfo_1 (0x5D0)"},
     {FE_GEN_51, 16, mKombi_2, "Kombi_2 (0x420)"},
     {FE_GEN_51, 17, mDiagnose_1, "Diagnose_1 (0x7D0)"},
+    // Gen51 V11.00.0: frame the 0AY monitors that we never sent (OEM code: spec_gen5_0ay §3).
+    // Standalone builds it (Gen5_0AY_frames20); in OEM mode the car's own frame always passes through.
+    {FE_GEN_51, 18, mGetriebe_1, "Getriebe_1 (0x440)"}, // gear (b1 low nibble)
+    // Volvo P1 (generation 31, V11.00.1): every frame on the V50's high-speed bus,
+    // all sent in standalone. Bits 0-1 follow the lock; the rest are steady values
+    // from the logs (plus their counters). Names say what's known about each one.
+    {FE_GEN_VOLVO_P1, 0, VOLVO_P1_ENGINE_TORQUE_ID, "Engine Torque / Pedal / Brake (0x0300410E)"},
+    {FE_GEN_VOLVO_P1, 1, VOLVO_P1_ENGINE_RPM_ID, "Engine RPM (0x0090411E)"},
+    {FE_GEN_VOLVO_P1, 2, VOLVO_P1_WHEELS_ID, "Wheel Speeds (0x01C04026)"},
+    {FE_GEN_VOLVO_P1, 3, VOLVO_P1_SPEED_ID, "Vehicle Speed (0x02104136)"},
+    {FE_GEN_VOLVO_P1, 4, VOLVO_P1_BRAKE_ID, "Brake Pressure / DSTC (0x02000026)"},
+    {FE_GEN_VOLVO_P1, 5, VOLVO_P1_HANDBRAKE_ID, "Handbrake (0x0110483C)"},
+    {FE_GEN_VOLVO_P1, 6, VOLVO_P1_STEERING_ID, "Steering Angle (0x02804026)"},
+    {FE_GEN_VOLVO_P1, 7, VOLVO_P1_0100082C_ID, "Unknown (0x0100082C)"},
+    {FE_GEN_VOLVO_P1, 8, VOLVO_P1_STEER_SENSOR_ID, "Steering Angle Sensor (0x0340412E)"},
+    {FE_GEN_VOLVO_P1, 9, VOLVO_P1_02C00020_ID, "Unknown (0x02C00020)"},
+    {FE_GEN_VOLVO_P1, 10, VOLVO_P1_00800006_ID, "Unknown (0x00800006)"},
+    {FE_GEN_VOLVO_P1, 11, VOLVO_P1_03800006_ID, "Unknown (0x03800006)"},
+    {FE_GEN_VOLVO_P1, 12, VOLVO_P1_19000026_ID, "Unknown (0x19000026)"},
+    {FE_GEN_VOLVO_P1, 13, VOLVO_P1_PULSES_ID, "Wheel Pulse Counters (0x19A00002)"},
+    {FE_GEN_VOLVO_P1, 14, VOLVO_P1_19E00006_ID, "Unknown (0x19E00006)"},
+    {FE_GEN_VOLVO_P1, 15, VOLVO_P1_1B200002_ID, "Unknown (0x1B200002)"},
+    {FE_GEN_VOLVO_P1, 16, VOLVO_P1_1B600002_ID, "Unknown (0x1B600002)"},
+    {FE_GEN_VOLVO_P1, 17, VOLVO_P1_1B700030_ID, "Unknown (0x1B700030)"},
+    {FE_GEN_VOLVO_P1, 18, VOLVO_P1_1A200020_ID, "Unknown (0x1A200020)"},
+    {FE_GEN_VOLVO_P1, 19, VOLVO_P1_1AE0092C_ID, "Unknown (0x1AE0092C)"},
+    {FE_GEN_VOLVO_P1, 20, VOLVO_P1_1BA0493C_ID, "Unknown, 20 Pages (0x1BA0493C)"},
+    {FE_GEN_VOLVO_P1, 21, VOLVO_P1_NETWORK_ID, "Network Heartbeat (0x1BE0493C)"},
 };
 const uint16_t frameEditBlockCount = sizeof(frameEditBlocks) / sizeof(frameEditBlocks[0]);
 
@@ -315,6 +425,8 @@ int frameEditGenIdx(uint8_t generation)
         return FE_GEN_50; // Gen5 0CQ VAQ shares 0CQ frame-edit toggles (clone base)
     case 51:
         return FE_GEN_51;
+    case GEN_VOLVO_P1:
+        return FE_GEN_VOLVO_P1; // Volvo P1: the standalone frames can be turned on / off
     default:
         return -1; // not gated (e.g. gen41/42)
     }
@@ -348,8 +460,12 @@ void resetFrameEditMask()
 bool canSleepEnabled = true;
 bool canSleepAggressive = false; // opt-in: transceiver standby + DFS floor 10MHz + low WiFi TX power
 bool benchMode = false;          // opt-in: hold WiFi up on the bench until real CAN traffic is seen
+bool bleEnabled = true;          // BLE link to the DashCAN app
+uint32_t blePasskey = 0;         // 0 = not made yet; setupBLE() generates one
 volatile bool canWakeRequest = false; // ISR-set wake flag when transceivers in standby see bus activity
 uint16_t lpWakeThresholdFps = 1100; // wake threshold fps; default 1100 — user adjustable via UI
+uint8_t sleepCalState = SLEEP_CAL_NONE;
+uint16_t sleepCalAvgFps = 0;
 
 bool otaUpdate = false;
 
@@ -392,6 +508,7 @@ float udsClutchCurrent = 0.0f;
 uint8_t udsClutchPWM = 0;
 float udsClutchVoltage = 0.0f;
 uint8_t udsBlockagePct = 0;
+volatile uint32_t udsLastDecodeMs = 0;
 
 // KWP2000 over VW TP2.0 diagnostics (Gen2 / Gen4 PQ Haldex)
 QueueHandle_t tp20RxQueue = nullptr;
@@ -429,16 +546,6 @@ uint16_t disengageAboveSpeed = 0;
 uint32_t rxtxcount = 0; // frame counter
 uint32_t stackCHS = 0;
 uint32_t stackHDX = 0;
-
-uint32_t stackframes10 = 0;
-uint32_t stackframes13 = 0;
-uint32_t stackframes20 = 0;
-uint32_t stackframes25 = 0;
-uint32_t stackframes50 = 0;
-uint32_t stackframes100 = 0;
-uint32_t stackframes200 = 0;
-uint32_t stackframes250 = 0;
-uint32_t stackframes1000 = 0;
 
 uint32_t stackbroadcastOpenHaldex = 0;
 uint32_t stackupdateLabels = 0;
@@ -504,6 +611,10 @@ uint8_t longLearnFloorResult = 0;
 uint64_t longLearnMaskStart = 0;
 uint16_t longLearnBpkStart = 0;
 bool longLearnBpkAdjusted = false;
+uint8_t longLearnFailReason = 0;
+uint8_t longLearnNoise = 0;
+uint8_t longLearnTol = 0;
+bool longLearnInteraction = false;
 LongLearnSweep longLearnSweeps[LL_MAX_SWEEPS];
 uint8_t longLearnSweepCount = 0;
 uint32_t longLearnStartMs = 0;
@@ -830,6 +941,30 @@ uint8_t gen42_090_nibble    = 0x00; // 4-bit (0-15): 0x090 D1 high nibble
 uint8_t gen42_20F_d6        = 0x00; // 0x20F D6 (+0x10 per frame, mod 256)
 uint8_t gen42_190_counter   = 0x00; // 4-bit (0-15): 0x190 D6
 uint8_t gen42_275_counter   = 0x80; // 0x275 D1 (+0x20 per 100 ms, mod 256)
+
+// Volvo / SAAB standalone counters and heartbeats (V10.00.0)
+bool volvoHeartbeatFlip = false; // Volvo 100 ms network frame: false = send the first byte 6-7 pair, true = its opposite
+uint8_t saab140Counter = 0;      // SAAB 0x140 byte 0 bits 0-1, counts 0-3
+uint8_t saab160Step = 0;         // SAAB 0x160 bytes 2/3 pair to send next, 0-3
+
+// Volvo / SAAB Haldex feedback (V10.00.0)
+int16_t received_haldex_temp_c = -128; // Haldex temperature in degC (SAAB 0x210 b2 - 40, VAG Gen4/0AY 0x2C0 b4 - 60); -128 = not received yet
+
+// CAN bus speed the two controllers were started at (set in setupCAN from the generation)
+uint16_t canBusSpeedKbps = 500;
+
+// True for the Volvo and SAAB generations added in V10.00.0. They share a lot:
+// no VW chassis decode, no VW checksums, linear lock scaling until learned.
+bool isVolvoOrSaabGeneration(uint8_t generation)
+{
+  if (generation == GEN_VOLVO_P2_GEN2) return true; // Volvo P2 Gen2
+  if (generation == GEN_VOLVO_P2_GEN3) return true; // Volvo P2 Gen3
+  if (generation == GEN_VOLVO_GEN4) return true;    // Volvo Gen4
+  if (generation == GEN_SAAB_93_XWD) return true;   // SAAB 9-3 XWD
+  if (generation == GEN_VOLVO_SPC_GEN5) return true; // Volvo Gen5 SPC 31380867 (V11.00.0)
+  if (generation == GEN_VOLVO_P1) return true;       // Volvo P1 S40 / V50 AWD (V11.00.1)
+  return false;
+}
 
 // 0x1CE Secondary Axle Torque Request (Nm). 0.0 = no request (open clutch).
 // Set from the API/mode handler. Encoding: 4 Nm/LSB (empirical; 0xFF = 1020 Nm max).

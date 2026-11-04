@@ -2,6 +2,33 @@ let currentEditCell = null; // global flag for current editted cell
 
 const MODE_NAMES = ["Stock", "FWD", "50:50", "60:40", "75:25", "Expert"]; // mode names as Strings
 
+// MQB drive mode select ("Charisma"). Numbers from the MQB K-matrix and jilleb/MQB-FPA
+// (https://github.com/jilleb/MQB-FPA). Drive profiles: what the driver picked (Charisma_07).
+const DRIVE_PROFILE_NAMES = [
+  "None",                       // 0
+  "Comfort",                    // 1
+  "Normal",                     // 2
+  "Sport",                      // 3
+  "Offroad",                    // 4
+  "Eco",                        // 5
+  "Race",                       // 6
+  "Individual",                 // 7
+  "Range / PHEV 1",             // 8
+  "Lift / PHEV 2",              // 9
+  "Snow / PHEV 3",              // 10
+  "Offroad Individual / PHEV 4", // 11
+];
+// Requested / actual mode for one system (Charisma_01 requests, Allrad_03 / Quersperre_03 replies)
+const CHARISMA_MODE_NAMES = [
+  "No Function", "Comfort", "Normal", "Sport", "Offroad", "Eco", "Race", "Individual / Eco+",
+  "On", "Off", "Snow", "Car-Specific 11", "Car-Specific 12", "Car-Specific 13", "Reserved 14", "Reserved 15",
+];
+// Status the Haldex / VAQ reports with its mode (K-matrix ALR_Charisma_Status)
+const CHARISMA_STATUS_NAMES = ["Starting Up", "Available", "Not Available", "Out of Step (Driver)"];
+const DRIVE_MODE_NOT_SET = 255; // "N/A" in the drive mode table
+// Default table: Comfort = Stock, Sport = 60:40, Race = 50:50, Individual = Expert, the rest N/A
+const DRIVE_MODE_DEFAULTS = [255, 0, 255, 3, 255, 255, 2, 5, 255, 255, 255, 255];
+
 // Cached settings for banner force-mode display and state legend (loaded once from /api/settings)
 let _tcForceModeValue     = 2;
 let _hazardForceModeValue = 2;
@@ -10,6 +37,8 @@ let _tcForceMode = false;
 let _hazardForceMode = false;
 let _extBtnForceMode = false;
 let _forceModesPriority = 0;
+let _driveModeForce = false;                        // "Use Drive Mode to Force Mode" setting
+let _driveModeForceValues = DRIVE_MODE_DEFAULTS.slice(); // copy of the default table until /api/settings loads
 let _haldexGeneration = 1;
 let _isStandalone = false;
 let _useCANifAvailable = false;
@@ -70,6 +99,7 @@ function initApp() {
   initLongLearn();
   initWifiSsid();
   initWifi();
+  initBle();
   initWifiSta("wifiSta");    // Diagnostics
   initWifiSta("otaWifiSta"); // OTA tab copy - gets the phone online for the GitHub check
   initBackupRestore();
@@ -111,6 +141,91 @@ async function fetchJson(url, options) {
   }
 }
 
+// Volvo / SAAB generations (V10.00.0) and the CAN bus speed each one needs
+const VOLVO_SAAB_GENERATIONS = [21, 3, 31, 43, 44, 53]; // 53 = Volvo Gen5 SPC (V11.00.0), 31 = Volvo P1 (V11.00.1)
+let _canSpeedKbps = 500; // speed the controller is running at (from /api/settings)
+
+// 250 kbit/s for Volvo P2 (Pre-Facelift), 500 kbit/s for everything else - matches the firmware
+function canSpeedForGeneration(gen) {
+  if (gen === 21) return 250;
+  return 500;
+}
+
+// show the "new, standalone only" note and the bus speed under the generation picker
+function updateVolvoSaabHint(gen) {
+  const hint = document.getElementById("genVolvoSaabHint");
+  if (!hint) return;
+  hint.style.display = VOLVO_SAAB_GENERATIONS.includes(gen) ? "" : "none";
+  const speed = document.getElementById("canSpeedKbps");
+  if (speed) speed.textContent = canSpeedForGeneration(gen);
+
+  // Volvo P1 Standalone card (V11.00.1): only for generation 31
+  const p1Card = document.getElementById("volvoP1Card");
+  if (p1Card) {
+    if (gen === 31) {
+      p1Card.style.display = "";
+    } else {
+      p1Card.style.display = "none";
+    }
+  }
+  // Frame Editing card: what ticked / unticked means for the P1 in Standalone
+  const p1FrameHint = document.getElementById("frameEditP1Hint");
+  if (p1FrameHint) {
+    if (gen === 31) {
+      p1FrameHint.style.display = "";
+    } else {
+      p1FrameHint.style.display = "none";
+    }
+  }
+}
+
+// Volvo P1 Standalone card (V11.00.1): the defaults the Reset to Defaults button puts back
+const VOLVO_P1_DEFAULTS = { source: 0, roadSpeedKmh: 30, gear: 2, torqueFull: 600, slipFullKmh: 10 };
+
+// Put the saved Volvo P1 values into the card's controls
+function showVolvoP1Settings(source, roadSpeedKmh, gear, torqueFull, slipFullKmh) {
+  const sourceSelect = document.getElementById("volvoP1LockSource");
+  if (sourceSelect) sourceSelect.value = String(source);
+  const gearSelect = document.getElementById("volvoP1Gear");
+  if (gearSelect && gear !== undefined) gearSelect.value = String(gear);
+  const speedRange = document.getElementById("volvoP1RoadSpeedRange");
+  const speedValue = document.getElementById("volvoP1RoadSpeedValue");
+  if (speedRange) speedRange.value = roadSpeedKmh;
+  if (speedValue) speedValue.textContent = roadSpeedKmh;
+  const torqueRange = document.getElementById("volvoP1TorqueFullRange");
+  const torqueValue = document.getElementById("volvoP1TorqueFullValue");
+  if (torqueRange) torqueRange.value = torqueFull;
+  if (torqueValue) torqueValue.textContent = torqueFull;
+  const slipRange = document.getElementById("volvoP1SlipFullRange");
+  const slipValue = document.getElementById("volvoP1SlipFullValue");
+  if (slipRange) slipRange.value = slipFullKmh;
+  if (slipValue) slipValue.textContent = slipFullKmh;
+}
+
+// The live line on the Volvo P1 card: what standalone is sending and what the module answers
+function updateVolvoP1Live(data) {
+  const line = document.getElementById("volvoP1Live");
+  if (!line) return;
+  const p1 = data.volvoP1;
+  if (!p1) {
+    line.textContent = "Live: --";
+    return;
+  }
+  let answer = "no reply from the module";
+  if (p1.engagementCount !== null && p1.engagementCount !== undefined) {
+    answer = "module engagement " + p1.engagementCount + " of 540";
+  }
+  if (!p1.standalone) {
+    line.textContent = "Live: OEM mode (the car's own frames pass through) - " + answer + ".";
+    return;
+  }
+  line.textContent =
+    "Live: asking " + p1.lockPercent + " %" +
+    " - torque " + p1.torque + ", pedal " + p1.pedal + ", " + p1.rpm + " rpm" +
+    ", front " + p1.frontKmh.toFixed(1) + " / rear " + p1.rearKmh.toFixed(1) + " km/h" +
+    " - " + answer + ".";
+}
+
 // initialise stored settings (async function)
 async function initStoredSettings() {
   // initialise stored settings and parse them
@@ -119,9 +234,20 @@ async function initStoredSettings() {
     // values
     document.getElementById("haldexGeneration").value =
       data.haldexGeneration || 1;
+    _canSpeedKbps = data.canSpeedKbps || 500;
+    updateVolvoSaabHint(data.haldexGeneration || 1);
     document.getElementById("tcForceModeValue").value     = data.tcForceModeValue     ?? 2;
     document.getElementById("hazardForceModeValue").value  = data.hazardForceModeValue  ?? 2;
     document.getElementById("extBtnForceModeValue").value  = data.extBtnForceModeValue  ?? 2;
+
+    // Drive mode select: on/off and the table (older firmware has neither, so keep the defaults)
+    _driveModeForce = data.driveModeForce === true;
+    if (Array.isArray(data.driveModeForceValues)) {
+      _driveModeForceValues = data.driveModeForceValues.slice();
+    }
+    const driveModeForceElem = document.getElementById("driveModeForce");
+    if (driveModeForceElem) driveModeForceElem.checked = _driveModeForce;
+    renderDriveModeTable();
 
     document.getElementById("disengageUnderSpeedRange").value =
       data.disengageUnderSpeed || 0;
@@ -172,6 +298,10 @@ async function initStoredSettings() {
       if (esp14Val) esp14Val.textContent = data.esp14MinFloorPct;
     }
 
+    if (data.volvoP1LockSource !== undefined) {
+      showVolvoP1Settings(data.volvoP1LockSource, data.volvoP1RoadSpeedKmh, data.volvoP1Gear, data.volvoP1TorqueFull, data.volvoP1SlipFullKmh);
+    }
+
     const llNotes = document.getElementById("longLearnNotes");
     if (llNotes && typeof data.longLearnNotes === "string") llNotes.value = data.longLearnNotes;
 
@@ -218,9 +348,14 @@ async function initStoredSettings() {
       data.followHandbrake || false;
     document.getElementById("invertHandbrake").checked =
       data.invertHandbrake || false;
+    // Follow ABS defaults ON (V11.00.0): only an explicit false turns it off
+    document.getElementById("followABS").checked = data.followABS !== false;
 
     document.getElementById("broadcastOpenHaldexOverCAN").checked =
       data.broadcastOpenHaldexOverCAN || false;
+    document.getElementById("espNowEnabled").checked = data.espNowEnabled !== false;
+    document.getElementById("espNowControl").checked = data.espNowControl !== false;
+    document.getElementById("canRelay").value = data.canRelay ?? 0;
 
     document.getElementById("disableOnboardButton").checked =
       data.disableOnboardButton || false;
@@ -250,6 +385,13 @@ async function initStoredSettings() {
     const benchModeElem = document.getElementById("benchMode");
     if (benchModeElem) benchModeElem.checked = data.benchMode || false;
 
+    const bleEnabledElem = document.getElementById("bleEnabled");
+    if (bleEnabledElem) bleEnabledElem.checked = data.bleEnabled !== undefined ? data.bleEnabled : true;
+    if (data.blePasskey !== undefined) {
+      blePasskeyCache = data.blePasskey;
+      renderBlePairing(data.bleCodeRequired);
+    }
+
     // Aggressive implies basic - lock the basic checkbox while aggressive is on.
     if (canSleepElem && canSleepAggrElem) {
       canSleepElem.disabled = canSleepAggrElem.checked;
@@ -261,6 +403,9 @@ async function initStoredSettings() {
       lpWakeRange.value = data.lpWakeThresholdFps;
       if (lpWakeVal) lpWakeVal.textContent = data.lpWakeThresholdFps;
     }
+    _sleepCalState = data.sleepCalState ?? 0;
+    _sleepCalAvgFps = data.sleepCalAvgFps ?? 0;
+    renderSleepCal();
 
     const analyzerModeElem = document.getElementById("analyzerMode");
     if (analyzerModeElem) analyzerModeElem.checked = data.analyzerMode || false;
@@ -286,6 +431,7 @@ async function initStoredSettings() {
     _isStandalone = data.isStandalone || false;
     _useCANifAvailable = data.useCANifAvailable || false;
     _disableController = data.disableController || false;
+    setTimeout(() => maybeOfferSleepSetup(_haldexGeneration), 1000);
 
     // parse speed/throttle/lock array from the ESP
     speedHeader = data.speedArray;
@@ -339,6 +485,8 @@ async function refreshStatus() {
     );
     document.getElementById("rpm").textContent = displayValue(data.rpm);
     document.getElementById("boost").textContent = displayValue(data.boost);
+    document.getElementById("coolantTemp").textContent = displayValue(data.coolantTemp); // PQ Kombi_2 (V11.00.4)
+    document.getElementById("oilTemp").textContent = displayValue(data.oilTemp);
 
     document.getElementById("lockTarget").textContent = displayValue(
       data.lockTarget,
@@ -349,10 +497,7 @@ async function refreshStatus() {
     document.getElementById("engagementFill").style.width =
       `${data.lockActual ?? 0}%`;
 
-    // Say why lock is being withheld. From 9.00.0 the speed/throttle window
-    // gates every mode including the force-mode triggers and Expert, which used
-    // to bypass it - so an inherited non-zero setting can zero lock everywhere
-    // and the only visible symptom was "Target: 0%".
+    // Say why lock is being held at 0% (speed / throttle cut-off), if it is.
     updateLockGateHint(data);
 
     // Steering-angle reduction band on the engagement bar: shows the portion of
@@ -388,6 +533,16 @@ async function refreshStatus() {
     document.getElementById("couplingOpen").textContent    = displayOnOff(data.couplingOpen);
     document.getElementById("speedLimit").textContent      = displayOnOff(data.speedLimit);
 
+    // V11.00.0 health bits. Generations whose feedback bits aren't known from
+    // the OEM code (healthSupported false) show "--" rather than a false "Off".
+    document.getElementById("limpMode").textContent        = healthOnOff(data.limpMode, data.healthSupported);
+    document.getElementById("awdWarning").textContent      = healthOnOff(data.awdWarning, data.healthSupported);
+    document.getElementById("tempSensorFault").textContent = healthOnOff(data.tempSensorFault, data.healthSupported);
+    document.getElementById("faultStored").textContent     = healthOnOff(data.faultStored, data.healthSupported);
+    document.getElementById("haldexTempC").textContent     = displayValue(data.haldexTempC);
+    updateHaldexWarnings(data); // red card at the top of the dashboard when the Haldex reports a problem
+    updateVolvoP1Live(data);    // live line on the Volvo P1 Standalone card (V11.00.1)
+
     // Per-corner slip [FL, FR, RL, RR]; null (no data / stale) shows as "--".
     {
       const slip = Array.isArray(data.slip) ? data.slip : [null, null, null, null];
@@ -405,6 +560,22 @@ async function refreshStatus() {
     const chassisOk = data.chassisCAN;
     const haldexOk = data.haldexCAN;
     canStatus.textContent = `CAN: ${chassisOk ? "✓" : "X"} Chassis | ${haldexOk ? "✓" : "X"} Haldex`;
+
+    if (data.bleCodeRequired !== undefined) renderBlePairing(data.bleCodeRequired);
+
+    const relayStatus = document.getElementById("canRelayStatus");
+    if (relayStatus && data.canRelay) {
+      const r = data.canRelay; // same wording as adc2can's CAN relay card
+      relayStatus.textContent = !r.rate ? "" :
+        `Relaying ${r.fps} frames/s` + (r.lostPerSec ? `, ${r.lostPerSec} lost/s - cap each ID's rate` : "") +
+        `  |  ${r.frames} relayed, ${r.lost} lost since boot`;
+    }
+
+    const bleStatus = document.getElementById("bleStatus");
+    if (bleStatus && data.bleConnected !== undefined) {
+      bleStatus.textContent = data.bleConnected ? "\u2713 Phone connected" : "No phone connected";
+      bleStatus.style.color = data.bleConnected ? "var(--success)" : "var(--text-dim)";
+    }
 
     setStatusPill("diagChassisCAN", chassisOk, "Healthy", "Unhealthy");
     setStatusPill("diagHaldexCAN", haldexOk, "Healthy", "Unhealthy");
@@ -438,6 +609,7 @@ async function refreshStatus() {
     setStatusPill("diagHandbrakeOut", data.handbrakeOut, "On", "Off");
     setStatusPill("diagBrakeFromCAN", data.brakeFromCAN, "On", "Off");
     setStatusPill("diagHandbrakeFromCAN", data.handbrakeFromCAN, "On", "Off");
+    setStatusPill("diagAbsBraking", data.absBraking, "On", "Off");
     document.getElementById("diagCpuUsage").textContent = displayValue(
       data.cpuUsage,
     );
@@ -448,10 +620,12 @@ async function refreshStatus() {
     document.getElementById("haldexState").textContent =
       data.haldexState === undefined || data.haldexState === null
         ? "--"
-        : hex2bin(data.haldexState);
+        : byteToBinary(data.haldexState);
 
     updateBannerSubtitle(data);
+    updateDriveModeDiag(data); // Diagnostics > Drive Mode card
     // Gen50 (0CQ/MQB): state byte is Allrad_03 byte 3 (Charisma) — use gen=50 legend.
+    // Gen52 (VAQ): Quersperre_03 byte 3 (Charisma, shifted up one bit) — its own layout.
     // Gen51 (0AY) and all PQ gens (1/2/4): state byte is Allrad_1 byte 0 (PQ fault flags) — use gen-specific PQ legend.
     const legendGen = _haldexGeneration;
     renderHaldexStateLegend(data.haldexState, legendGen);
@@ -540,8 +714,10 @@ async function refreshStatus() {
   }
 }
 
-function hex2bin(hex) {
-  return ("00000000" + parseInt(hex, 16).toString(2)).substr(-8);
+// "00010010" for the state byte. The firmware sends it as a plain number (18), not hex
+// text: reading it as hex ("18" -> 0x18) showed the wrong bits before V10.00.1.
+function byteToBinary(value) {
+  return ("00000000" + Number(value).toString(2)).substr(-8);
 }
 
 // Set a diagnostics value as a coloured status pill.
@@ -575,6 +751,16 @@ function updateBannerSubtitle(data) {
   el.textContent = text;
 }
 
+// The drive mode select's force, as a banner trigger ("Sport" forcing 60:40), or null.
+// The firmware works out which mode the profile forces; this only labels it.
+function getDriveModeForce(data) {
+  if (!_driveModeForce) return null;
+  const drive = data.driveMode;
+  if (!drive || !drive.seen) return null;
+  if (drive.forcing === undefined || drive.forcing < 0) return null;
+  return { source: driveProfileName(drive.profile), mode: drive.forcing };
+}
+
 function getActiveForceMode(data) {
   const triggers = [
     { source: "TC",  enabled: _tcForceMode,     active: data.tcOn === false,           mode: _tcForceModeValue },
@@ -594,15 +780,16 @@ function getActiveForceMode(data) {
     const trigger = triggers[index];
     if (trigger.enabled && trigger.active) return trigger;
   }
-  return null;
+  return getDriveModeForce(data); // the drive mode select comes after the three buttons
 }
 
 // Render a bit-by-bit legend for the Haldex state byte, generation-aware.
-function renderHaldexStateLegend(rawHex, gen) {
+// stateByte is a plain number from /api/status (not hex text).
+function renderHaldexStateLegend(stateByte, gen) {
   const el = document.getElementById("haldexStateLegend");
   if (!el) return;
-  if (rawHex === undefined || rawHex === null) { el.innerHTML = ""; return; }
-  const val = parseInt(rawHex, 16);
+  if (stateByte === undefined || stateByte === null) { el.innerHTML = ""; return; }
+  const val = Number(stateByte);
 
   if (gen === 1 || gen === 2 || gen === 4 || gen === 51) {
     // PQ (Gen 1/2/4): Allrad_1 byte 0 — fault/status flags
@@ -623,17 +810,46 @@ function renderHaldexStateLegend(rawHex, gen) {
     });
     html += `</table>`;
     el.innerHTML = html;
-  } else if (gen === 50) {
-    // MQB (Gen 5): Allrad_03 byte 3 = ALR_Charisma_FahrPr / ALR_Charisma_Status
-    const prog = val & 0x0F;
-    const flags = (val >> 4) & 0x0F;
+  } else if (gen === 50 || gen === 52) {
+    // MQB drive mode reply (K-matrix):
+    //   Gen5 Allrad_03 byte 3:     bits 0-3 ALR_Charisma_FahrPr, bits 4-5 ALR_Charisma_Status
+    //   VAQ Quersperre_03 byte 3:  bit 0 Sendestatus, bits 1-4 VAQ_Charisma_FahrPr, bits 5-6 Status
+    const reply = decodeCharismaReply(val, gen);
+    let modeBits = "bits 0–3";
+    let statusBits = "bits 4–5";
+    if (gen === 52) {
+      modeBits = "bits 1–4";
+      statusBits = "bits 5–6";
+    }
     el.innerHTML =
       `<table><tr><th>Field</th><th>Value</th></tr>` +
-      `<tr><td>Driving Programme (bits 0–3)</td><td>${prog}</td></tr>` +
-      `<tr><td>Status Flags (bits 4–7)</td><td>0x${flags.toString(16).toUpperCase()}</td></tr>` +
-      `</table><p style="margin:4px 0 0;">Note: bit 4–5 of byte 1 = longitudinal lock state (0=open, 1=partial, 2=closed) — separate from this byte.</p>`;
+      `<tr><td>Drive Mode (${modeBits})</td><td>${charismaModeText(reply.mode)}</td></tr>` +
+      `<tr><td>Status (${statusBits})</td><td>${CHARISMA_STATUS_NAMES[reply.status]} (${reply.status})</td></tr>` +
+      `</table><p style="margin:4px 0 0;">The mode the unit is running for the car's drive mode select. See Diagnostics &gt; Drive Mode.</p>`;
   } else if (gen === 41) {
     el.innerHTML = `<em>Gen 4.1: dedicated status variables used — see Gen41 card above.</em>`;
+  } else if (gen === 53) {
+    // Volvo Gen5 SPC (V11.00.0): 0x126 byte 3, bits 3-4 = unit status (OEM code)
+    const status = (val >> 3) & 0x03;
+    let statusText = "Normal";
+    if (status === 1) statusText = "Fault / torque inhibited";
+    if (status === 2) statusText = "Special state (meaning unknown)";
+    if (status === 3) statusText = "Unknown";
+    el.innerHTML =
+      `<table><tr><th>Field</th><th>Value</th></tr>` +
+      `<tr><td>Status (byte 3 bits 3–4)</td><td>${statusText} (${status})</td></tr>` +
+      `</table>`;
+  } else if (gen === 31) {
+    // Volvo P1 (V11.00.1): 0x1960000A byte 5 = status, from the V50 T5 AWD logs
+    let statusText = "Not seen in the logs yet";
+    if (val === 0x2e) statusText = "Ignition on, engine off";
+    if (val === 0x2c || val === 0x3c) statusText = "Engine running (bit 4 meaning not known yet)";
+    el.innerHTML =
+      `<table><tr><th>Field</th><th>Value</th></tr>` +
+      `<tr><td>Status (byte 5)</td><td>${statusText}</td></tr>` +
+      `</table>`;
+  } else if (VOLVO_SAAB_GENERATIONS.includes(gen)) {
+    el.innerHTML = `<em>Volvo / SAAB: this is byte 0 of the Haldex reply, shown raw. Its bits aren't decoded yet - logs needed.</em>`;
   } else {
     el.innerHTML = "";
   }
@@ -725,12 +941,14 @@ async function saveSetting(key, value) {
 
     if (!response.ok) {
       showNotification("Failed to save setting", "error");
-    } else {
-      updateCachedSetting(key, value);
+      return false;
     }
+    updateCachedSetting(key, value);
+    return true;
   } catch (error) {
     console.log("Saving setting failed: " + error.message);
     showNotification("Error saving setting", "error");
+    return false;
   }
 }
 
@@ -742,6 +960,167 @@ function updateCachedSetting(key, value) {
   if (key === "tcForceMode") _tcForceMode = value;
   if (key === "hazardForceMode") _hazardForceMode = value;
   if (key === "extButtonForceMode") _extBtnForceMode = value;
+  if (key === "driveModeForce") _driveModeForce = value;
+}
+
+// ---- Drive mode select (Settings > Mode Options) ---------------------------
+// One row per drive profile (Comfort ... Offroad Individual), each with a drop-down
+// of OpenHaldex modes plus N/A. Profile 0 ("None") isn't shown.
+function renderDriveModeTable() {
+  const table = document.getElementById("driveModeForceTable");
+  if (!table) return;
+  table.innerHTML = "";
+  table.className = "drive-mode-table"; // two-column grid: profile name | drop-down
+  for (let profile = 1; profile < DRIVE_PROFILE_NAMES.length; profile++) {
+    const label = document.createElement("span");
+    label.className = "toggle-label";
+    label.textContent = DRIVE_PROFILE_NAMES[profile];
+    table.appendChild(label);
+
+    const select = document.createElement("select");
+    select.className = "input-select";
+    select.id = "driveModeForceValue" + profile;
+    select.dataset.profile = profile; // which table entry this drop-down sets
+
+    const notSetOption = document.createElement("option");
+    notSetOption.value = DRIVE_MODE_NOT_SET;
+    notSetOption.textContent = "N/A";
+    select.appendChild(notSetOption);
+    for (let mode = 0; mode < MODE_NAMES.length; mode++) {
+      const option = document.createElement("option");
+      option.value = mode;
+      option.textContent = MODE_NAMES[mode];
+      select.appendChild(option);
+    }
+
+    let value = _driveModeForceValues[profile];
+    if (value === undefined || value >= MODE_NAMES.length) value = DRIVE_MODE_NOT_SET;
+    select.value = value;
+    select.addEventListener("change", saveDriveModeTable);
+    table.appendChild(select);
+  }
+}
+
+// A drive mode drop-down changed: send the whole table (it's only 12 numbers)
+async function saveDriveModeTable(event) {
+  const select = event.target;
+  const profile = parseInt(select.dataset.profile);
+  const newValues = _driveModeForceValues.slice();
+  while (newValues.length < DRIVE_PROFILE_NAMES.length) newValues.push(DRIVE_MODE_NOT_SET);
+  newValues[profile] = parseInt(select.value);
+  if (await saveSetting("driveModeForceValues", newValues)) {
+    _driveModeForceValues = newValues;
+  }
+}
+
+// Fill in the Diagnostics > Drive Mode card from /api/status
+function updateDriveModeDiag(data) {
+  const profileElem = document.getElementById("diagDriveProfile");
+  if (!profileElem) return;
+  const sourceElem = document.getElementById("diagDriveSource");
+  const haldexRequestElem = document.getElementById("diagDriveHaldexRequest");
+  const vaqRequestElem = document.getElementById("diagDriveVaqRequest");
+  const haldexReportElem = document.getElementById("diagDriveHaldexReport");
+  const forcingElem = document.getElementById("diagDriveForcing");
+
+  const drive = data.driveMode;
+  if (!drive) {
+    // older firmware: no drive mode data at all
+    profileElem.textContent = "--";
+    sourceElem.textContent = "--";
+    haldexRequestElem.textContent = "--";
+    vaqRequestElem.textContent = "--";
+    haldexReportElem.textContent = "--";
+    forcingElem.textContent = "--";
+    return;
+  }
+
+  if (drive.seen) {
+    profileElem.textContent = driveProfileName(drive.profile) + " (" + drive.profile + ")";
+  } else {
+    profileElem.textContent = "Not Seen";
+  }
+
+  if (!drive.seen) {
+    sourceElem.textContent = "--";
+  } else if (drive.source === 7) {
+    sourceElem.textContent = "Charisma_07 (0x3E8)";
+  } else if (drive.source === 1) {
+    sourceElem.textContent = "Charisma_01 (0x385) Engine Request";
+  } else {
+    sourceElem.textContent = "--";
+  }
+
+  haldexRequestElem.textContent = charismaModeText(drive.haldexRequest);
+  vaqRequestElem.textContent = charismaModeText(drive.vaqRequest);
+
+  // What the Haldex / VAQ says back, from the Haldex state byte
+  const report = decodeCharismaReply(data.haldexState, _haldexGeneration);
+  if (report) {
+    haldexReportElem.textContent = charismaModeText(report.mode) + ", " + CHARISMA_STATUS_NAMES[report.status];
+  } else {
+    haldexReportElem.textContent = "--";
+  }
+
+  if (!_driveModeForce) {
+    forcingElem.textContent = "Off";
+  } else if (drive.forcing >= 0) {
+    forcingElem.textContent = MODE_NAMES[drive.forcing] ?? "Unknown";
+  } else {
+    forcingElem.textContent = "No (N/A)";
+  }
+}
+
+// "Sport" for a drive profile number
+function driveProfileName(profile) {
+  const name = DRIVE_PROFILE_NAMES[profile];
+  if (name === undefined) return "Profile " + profile;
+  return name;
+}
+
+// "Normal (2)" for a requested / actual Charisma mode number, "--" when there isn't one
+function charismaModeText(mode) {
+  if (mode === undefined || mode === null) return "--";
+  return CHARISMA_MODE_NAMES[mode] + " (" + mode + ")";
+}
+
+// The mode + status the Haldex (Gen5, Allrad_03 byte 3) or VAQ (Gen52, Quersperre_03 byte 3)
+// reports back to the gateway, or null for other generations / no data.
+function decodeCharismaReply(stateByte, gen) {
+  if (stateByte === undefined || stateByte === null) return null;
+  const value = Number(stateByte);
+  if (gen === 50) {
+    // Allrad_03 byte 3: bits 0-3 ALR_Charisma_FahrPr, bits 4-5 ALR_Charisma_Status
+    return { mode: value & 0x0F, status: (value >> 4) & 0x03 };
+  }
+  if (gen === 52) {
+    // Quersperre_03 byte 3: bit 0 Sendestatus, bits 1-4 VAQ_Charisma_FahrPr, bits 5-6 VAQ_Charisma_Status
+    return { mode: (value >> 1) & 0x0F, status: (value >> 5) & 0x03 };
+  }
+  return null;
+}
+
+// ---- Sleep auto-setup (offered once, Gen5) ---------------------------------
+let _sleepCalState = 0; // 0 never asked, 1 armed, 2 done, 3 declined
+let _sleepCalAvgFps = 0;
+
+function renderSleepCal() {
+  const el = document.getElementById("sleepCalStatus");
+  if (!el) return;
+  if (_sleepCalState === 1) el.textContent = "Auto-setup armed: next time the car is left, the parked bus is measured for 15 min.";
+  if (_sleepCalState === 2) el.textContent = `Auto-set from the parked bus (average ${_sleepCalAvgFps} fps).`;
+  el.hidden = _sleepCalState !== 1 && _sleepCalState !== 2;
+}
+
+// On page load: only if never asked. On a generation change to Gen5: always.
+async function maybeOfferSleepSetup(gen, changed = false) {
+  if (![50, 51, 52].includes(gen) || (!changed && _sleepCalState !== 0)) return;
+  const yes = confirm("Enable CAN sleep and set it up automatically?\n\n" +
+    "Next time the car is left, the controller measures the parked bus for 15 min and sets the wake threshold. Runs once.");
+  if (await saveSetting("sleepCalArm", yes)) {
+    _sleepCalState = yes ? 1 : 3;
+    renderSleepCal();
+  }
 }
 
 // ---- Frame-edit gating (Diagnostics > Frame Editing) ----------------------
@@ -873,6 +1252,59 @@ function initNavigation() {
 function initDashboard() {
   refreshStatus(); //
   setInterval(refreshStatus, setIntervalDuration); // request for new data every xms
+  startLiveRefresh(); // faster Live Data poll, if picked in Display Options (V11.00.4)
+}
+
+// ---- Live Data Refresh (V11.00.4) ----------------------------------------
+// The full /api/dashboard poll above stays at twice a second. When a faster
+// rate is picked in Display Options, a second poll asks /api/live (only the
+// Live Data tiles and the lock, a much smaller reply) at that rate.
+let liveRefreshTimer = null;   // the running fast poll, or null when it's off
+let isLiveRequestBusy = false; // true while waiting for a reply, so slow replies never pile up
+
+function startLiveRefresh() {
+  if (liveRefreshTimer !== null) {
+    clearInterval(liveRefreshTimer); // stop the old rate first
+    liveRefreshTimer = null;
+  }
+  if (gaugePrefs.liveRefreshMs < setIntervalDuration) {
+    liveRefreshTimer = setInterval(refreshLiveData, gaugePrefs.liveRefreshMs);
+  }
+}
+
+async function refreshLiveData() {
+  if (isLiveRequestBusy) {
+    return; // the last request hasn't come back yet - skip this turn
+  }
+  isLiveRequestBusy = true;
+  try {
+    const data = await fetchJson("/api/live");
+    if (data) {
+      const displayValue = (value) => (value ?? "--");
+      document.getElementById("speed").textContent = displayValue(data.speed);
+      document.getElementById("throttle").textContent = displayValue(data.throttle);
+      document.getElementById("rpm").textContent = displayValue(data.rpm);
+      document.getElementById("boost").textContent = displayValue(data.boost);
+      document.getElementById("coolantTemp").textContent = displayValue(data.coolantTemp);
+      document.getElementById("oilTemp").textContent = displayValue(data.oilTemp);
+      document.getElementById("lockTarget").textContent = displayValue(data.lockTarget);
+      document.getElementById("lockActual").textContent = displayValue(data.lockActual);
+      document.getElementById("engagementFill").style.width = `${data.lockActual ?? 0}%`;
+
+      // Same drawing as the full poll; the intro sweep owns the dials while it runs.
+      if (!introSweep.active) {
+        updateEngagementGauge(data.lockTarget ?? null, data.lockActual ?? null);
+      }
+      const traceNow = Date.now();
+      pushLockSample(data.lockTarget, data.lockActual, traceNow);
+      if (gaugePrefs.trace) renderLockTrace(traceNow);
+      if (!introSweep.active) updateTileGauges();
+      refreshTrace(data); // move the Expert map highlight too
+    }
+  } catch (error) {
+    console.log("Live data failed: " + error.message);
+  }
+  isLiveRequestBusy = false;
 }
 
 // initialise mode buttons
@@ -925,14 +1357,25 @@ function initModeButtons() {
 // initialise settings with immediate save on change
 function initSettings() {
   // Selects (dropdown menus)
-  const selectIds = ["haldexGeneration", "tcForceModeValue", "hazardForceModeValue", "extBtnForceModeValue", "forceModesPriority"];
+  const selectIds = ["haldexGeneration", "tcForceModeValue", "hazardForceModeValue", "extBtnForceModeValue", "forceModesPriority", "canRelay"];
   selectIds.forEach((id) => {
     const elem = document.getElementById(id);
     if (elem) {
       elem.addEventListener("change", async () => {
         await saveSetting(id, parseInt(elem.value));
         // Generation change alters which frames are editable — refresh the list.
-        if (id === "haldexGeneration") refreshFrameBlocks();
+        if (id === "haldexGeneration") {
+          _haldexGeneration = parseInt(elem.value);
+          updateVolvoSaabHint(_haldexGeneration);
+          // Volvo P2 (Pre-Facelift) needs 250 kbit/s: the controller saves and
+          // restarts ~2 s after the change, so warn and reload once it is back.
+          if (canSpeedForGeneration(_haldexGeneration) !== _canSpeedKbps) {
+            showNotification("CAN bus speed changing to " + canSpeedForGeneration(_haldexGeneration) + " kbit/s - controller restarting");
+            setTimeout(() => location.reload(), 10000);
+          }
+          refreshFrameBlocks();
+          maybeOfferSleepSetup(_haldexGeneration, true); // picking Gen5 always asks again
+        }
       });
     }
   });
@@ -985,6 +1428,41 @@ function initSettings() {
   // save on release (change) so a live car isn't streamed calibration changes.
   // Reset buttons put the slider back to the firmware default and save it,
   // in case a page scroll nudged the value.
+  // Volvo P1 Standalone card (V11.00.1): the dropdown saves straight away, the
+  // sliders update their number while dragging and save when let go
+  const p1Source = document.getElementById("volvoP1LockSource");
+  if (p1Source) {
+    p1Source.addEventListener("change", () => { saveSetting("volvoP1LockSource", parseInt(p1Source.value)); });
+  }
+  const p1Gear = document.getElementById("volvoP1Gear");
+  if (p1Gear) {
+    p1Gear.addEventListener("change", () => { saveSetting("volvoP1Gear", parseInt(p1Gear.value)); });
+  }
+  const p1Sliders = [
+    { range: "volvoP1RoadSpeedRange", value: "volvoP1RoadSpeedValue", key: "volvoP1RoadSpeedKmh" },
+    { range: "volvoP1TorqueFullRange", value: "volvoP1TorqueFullValue", key: "volvoP1TorqueFull" },
+    { range: "volvoP1SlipFullRange", value: "volvoP1SlipFullValue", key: "volvoP1SlipFullKmh" },
+  ];
+  p1Sliders.forEach((slider) => {
+    const rangeElem = document.getElementById(slider.range);
+    const valueElem = document.getElementById(slider.value);
+    if (rangeElem) {
+      rangeElem.addEventListener("input", () => { if (valueElem) valueElem.textContent = rangeElem.value; });
+      rangeElem.addEventListener("change", () => { saveSetting(slider.key, parseInt(rangeElem.value)); });
+    }
+  });
+  const p1Reset = document.getElementById("volvoP1ResetBtn");
+  if (p1Reset) {
+    p1Reset.addEventListener("click", () => {
+      showVolvoP1Settings(VOLVO_P1_DEFAULTS.source, VOLVO_P1_DEFAULTS.roadSpeedKmh, VOLVO_P1_DEFAULTS.gear, VOLVO_P1_DEFAULTS.torqueFull, VOLVO_P1_DEFAULTS.slipFullKmh);
+      saveSetting("volvoP1LockSource", VOLVO_P1_DEFAULTS.source);
+      saveSetting("volvoP1RoadSpeedKmh", VOLVO_P1_DEFAULTS.roadSpeedKmh);
+      saveSetting("volvoP1Gear", VOLVO_P1_DEFAULTS.gear);
+      saveSetting("volvoP1TorqueFull", VOLVO_P1_DEFAULTS.torqueFull);
+      saveSetting("volvoP1SlipFullKmh", VOLVO_P1_DEFAULTS.slipFullKmh);
+    });
+  }
+
   const bpkRange = document.getElementById("bpkCeilingRange");
   const bpkVal = document.getElementById("bpkCeilingValue");
   const bpkReset = document.getElementById("bpkCeilingResetBtn");
@@ -1027,11 +1505,15 @@ function initSettings() {
     "useCANifAvailable",
     "tcForceMode",
     "hazardForceMode",
+    "driveModeForce",
     "followBrake",
     "invertBrake",
     "followHandbrake",
     "invertHandbrake",
+    "followABS",
     "broadcastOpenHaldexOverCAN",
+    "espNowEnabled",
+    "espNowControl",
     "disableOnboardButton",
     "disableExternalButton",
     "fixHunting",
@@ -1039,6 +1521,7 @@ function initSettings() {
     "canSleepEnabled",
     "canSleepAggressive",
     "benchMode",
+    "bleEnabled",
     "liveDiagEnabled",
     "lockReleaseEnabled",
     "steeringScaleEnabled",
@@ -1492,11 +1975,19 @@ function initLearn() {
 // Drives /api/longlearn/*: polls status while a run is active, renders the
 // tracker + per-block verdicts, keeps the chassis notes on the unit, and
 // exports a plain-text report of the car, calibration, block set and sweeps.
-const LL_PHASE_NAMES = ["Idle", "Initial Sweep (all blocks on)", "BPK Adjust (torque ceiling)",
-                        "Sweeping Blocks", "Confirmation learn on final set", "Complete", "Cancelled", "Failed"];
+const LL_PHASE_NAMES = ["Idle", "Reference (all blocks on)", "BPK Adjust (hunting)",
+                        "Testing blocks (one off, point reads)", "Confirmation sweep", "Complete", "Cancelled", "Failed"];
 const LL_RESULT = { 0: ["untested", ""], 1: ["core", "core"], 2: ["needed", "needed"],
-                    3: ["not needed", "removed"], 4: ["affects (better without)", "harmful"] };
-const LL_SWEEP_KIND = ["baseline", "floor", "block", "final", "bpk ceiling"];
+                    3: ["no effect", "removed"], 4: ["affects (higher without)", "harmful"] };
+const LL_SWEEP_KIND = ["reference", "reference points", "block", "final", "bpk"];
+const LL_FAIL = ["", "no Haldex data with all blocks on",
+                 "all blocks on is not a smooth 100% - fix that first, nothing to compare blocks against",
+                 "the two all-on point reads disagree too much (noisy) to judge blocks"];
+// Block-off sweep for a bit -> " (dev N%)" suffix, or "" if not tested yet.
+function llDev(data, bit) {
+  const sw = (data.sweeps || []).find((x) => x.kind === 2 && x.bit === bit);
+  return sw ? ` (dev ${sw.dev}%)` : "";
+}
 
 function llScoreText(sc) {
   if (!sc) return "--";
@@ -1545,8 +2036,8 @@ function initLongLearn() {
       if (data.active && data.currentBit === b.bit) { cls = "testing"; txt = "testing\u2026"; }
       else {
         const r = LL_RESULT[b.result] || LL_RESULT[0];
-        txt = r[0]; cls = r[1];
-        if (b.result === 0) txt = b.def ? "default" : (data.phase === 0 ? (b.enabled ? "on" : "off") : "queued");
+        txt = r[0] + llDev(data, b.bit); cls = r[1];
+        if (b.result === 0) txt = b.core ? "core" : (data.phase === 0 ? (b.enabled ? "on" : "off") : "queued");
       }
       tag.className = "ll-tag " + cls;
       tag.textContent = txt;
@@ -1581,16 +2072,16 @@ function initLongLearn() {
     } else if (running && data.phase === 1) {
       testing = "all blocks on";
     } else if (running && data.phase === 2) {
-      testing = `raising torque ceiling (${data.bpkNow} Nm)`;
+      testing = `BPK packing / torque ceiling (${data.bpkNow} Nm)`;
     } else if (running && data.phase === 4) {
       testing = "final block set";
     }
     setText("llTesting", testing);
     const isGen5 = data.generation === 50 || data.generation === 52;
     setText("llFloor", isGen5 ? `${data.floorNow}%` + (data.phase >= 2 ? ` (was ${data.floorStart}%)` : "") : "n/a (Gen5 only)");
-    setText("llBpk", isGen5 ? `${data.bpkNow} Nm` + (data.bpkAdjusted ? ` (was ${data.bpkStart} Nm)` : "") +
-      (data.phase >= 3 && !running ? ` — Fix Hunting reverted to ${data.fixHunting ? "on" : "off"}, turn it on to use this` : "") : "n/a (Gen5 only)");
-    setText("llBaseline", llScoreText(data.baseline));
+    setText("llBpk", isGen5 ? `${data.bpkNow} Nm, Fix Hunting ${data.fixHunting ? "on" : "off"}` +
+      (data.bpkAdjusted ? ` (was ${data.bpkStart} Nm)` : "") : "n/a (Gen5 only)");
+    setText("llBaseline", llScoreText(data.baseline) + (data.phase >= 3 && data.phase !== 7 ? ` · noise ${data.noise}%, threshold ${data.tol}%` : ""));
     setText("llElapsed", llFmtElapsed(data.elapsedS));
 
     const cf = data.cf ?? 0, eng = data.eng ?? 0;
@@ -1608,14 +2099,15 @@ function initLongLearn() {
       const kept = (data.blocks || []).filter((b) => b.enabled).length;
       statusText.textContent = `Long Learn complete \u2713 \u2014 ${kept} of ${(data.blocks || []).length} blocks enabled, ` +
         (isGen5 ? `PWM floor ${data.floorResult}%, ` : "") +
-        (isGen5 && data.bpkAdjusted ? `torque ceiling ${data.bpkNow} Nm (turn Fix Hunting on to use it), ` : "") +
+        (isGen5 && data.bpkAdjusted ? `BPK kept: Fix Hunting ${data.fixHunting ? "on" : "off"}, ceiling ${data.bpkNow} Nm, ` : "") +
+        (data.interaction ? "the no-effect blocks changed the curve when off TOGETHER, so all were left on, " : "") +
         `final: ${llScoreText(f)}`;
-      statusText.style.color = f && f.smooth ? "var(--success)" : "var(--warning)";
+      statusText.style.color = f && f.smooth && !data.interaction ? "var(--success)" : "var(--warning)";
     } else if (data.phase === 6) {
       statusText.textContent = "Long Learn cancelled \u2014 previous blocks, floor, torque ceiling and learn table restored";
       statusText.style.color = "var(--warning)";
     } else if (data.phase === 7) {
-      statusText.textContent = "Long Learn failed \u2014 no Haldex data during a sweep. Previous settings restored";
+      statusText.textContent = `Long Learn stopped \u2014 ${LL_FAIL[data.failReason] || "sweep failed"}. Previous settings restored`;
       statusText.style.color = "var(--danger)";
     } else {
       statusText.textContent = "Not run yet";
@@ -1725,19 +2217,22 @@ function buildLongLearnReport(settings, ll, learn, notesText) {
   L.push(`  Launch PWM Floor: ${settings.esp14MinFloorPct} %` +
          (ll.phase === 5 && isGen5 ? `  (Long Learn: ${ll.floorStart} % -> ${ll.floorResult} %)` : ""));
   if (ll.phase === 5 && isGen5 && ll.bpkAdjusted) {
-    L.push(`  Torque ceiling raised by Long Learn: ${ll.bpkStart} Nm -> ${ll.bpkNow} Nm (Fix Hunting reverted - turn it on to use this)`);
+    L.push(`  BPK set by Long Learn (kept): Fix Hunting ${ll.fixHunting ? "on" : "off"}, ceiling ${ll.bpkStart} Nm -> ${ll.bpkNow} Nm`);
   }
   L.push("");
   L.push(`Long Learn: ${LL_PHASE_NAMES[ll.phase] || "--"}` +
          (ll.phase >= 5 ? `  (${ll.sweepIdx} sweeps, ${llFmtElapsed(ll.elapsedS)}, test-all ${ll.testAll ? "on" : "off"})` : ""));
+  if (ll.phase === 7) L.push(`  Stopped: ${LL_FAIL[ll.failReason] || "sweep failed"}`);
   if (ll.baseline) L.push(`  Reference (all on): ${llScoreText(ll.baseline)}`);
+  if (ll.phase === 5) L.push(`  Reference noise ${ll.noise}%, block threshold ${ll.tol}% (worst of the points CF ${(ll.ptCF || []).join("/")})`);
   if (ll.final)    L.push(`  Final (kept set):   ${llScoreText(ll.final)}`);
+  if (ll.interaction) L.push("  INTERACTION: the no-effect blocks changed the curve when off together - all left on");
   L.push("");
   L.push(`Frame blocks (mask ${ll.mask || "--"}) - [x] = enabled. Edit and re-apply under Diagnostics > Frame Editing:`);
   (ll.blocks || []).forEach((b) => {
     const r = LL_RESULT[b.result] || LL_RESULT[0];
     const verdict = b.result === 0 ? (ll.phase === 0 ? "" : "untested") : r[0];
-    L.push(`  [${b.enabled ? "x" : " "}] ${pad(b.name, 22)} bit ${pad(b.bit, 3)} ${pad(b.def ? "default" : "added", 8)} ${verdict}`);
+    L.push(`  [${b.enabled ? "x" : " "}] ${pad(b.name, 22)} bit ${pad(b.bit, 3)} ${pad(b.core ? "core" : "static", 8)} ${verdict}${llDev(ll, b.bit)}`);
   });
   L.push("");
   if (Array.isArray(ll.sweeps) && ll.sweeps.length) {
@@ -1748,11 +2243,14 @@ function buildLongLearnReport(settings, ll, learn, notesText) {
         const b = (ll.blocks || []).find((x) => x.bit === sw.bit);
         what = `without ${b ? b.name : "bit " + sw.bit}`;
       } else if (sw.kind === 4) {
-        what = `ceiling ${sw.bpk} Nm`;
+        what = `bpk ${sw.bpk} Nm`;
       }
-      const verdict = sw.kind === 2 ? ((LL_RESULT[sw.verdict] || ["?"])[0]) : (sw.verdict ? "smooth/100%" : "not smooth/100%");
-      L.push(`  #${pad(i + 1, 3)} ${pad(what, 28)} floor ${pad(sw.floor + "%", 5)} reach ${pad(sw.reach, 4)} step ${pad(sw.maxStep, 3)} ` +
-             `engage@${pad(sw.engageCF > 100 ? "--" : sw.engageCF, 3)}->${pad(sw.engageJump, 3)} score ${pad(sw.score, 3)} => ${verdict}`);
+      const pts = Array.isArray(sw.pts) ? sw.pts : null; // point reads, not a curve
+      const verdict = sw.kind === 2 ? ((LL_RESULT[sw.verdict] || ["?"])[0]) : sw.kind === 1 ? "" : (sw.verdict ? "smooth" : "NOT smooth");
+      const dev = sw.kind === 2 || sw.kind === 3 ? ` dev ${pad(sw.dev, 3)} mean ${pad((sw.dMean > 0 ? "+" : "") + sw.dMean, 4)}` : "";
+      L.push(`  #${pad(i + 1, 3)} ${pad(what, 28)} ` + (pts ? pts.map((v, k) => `@${(ll.ptCF || [])[k]} ${pad(v, 4)}`).join("") :
+             `reach ${pad(sw.reach, 4)} step ${pad(sw.maxStep, 3)} engage@${pad(sw.engageCF > 100 ? "--" : sw.engageCF, 3)}->${pad(sw.engageJump, 3)} score ${pad(sw.score, 3)}`) +
+             `${dev}${verdict ? " => " + verdict : ""}`);
     });
     L.push("");
   }
@@ -1842,6 +2340,35 @@ function initWifiSsid() {
     status.textContent = "AP restarting as \"" + (resp.ssid || defaultSsid) + "\"\u2026";
     status.style.color = "var(--text-dim)";
     showNotification("WiFi SSID reset to default - reconnect to AP");
+  });
+}
+
+// Pairing line on the Bluetooth card: the code is only asked from the second phone on.
+let blePasskeyCache = null;
+function renderBlePairing(codeRequired) {
+  const el = document.getElementById("blePairing");
+  if (!el) return;
+  el.textContent = codeRequired
+    ? `Pairing code for another phone: ${blePasskeyCache ?? "--"}`
+    : "No phone paired yet - the first phone pairs without a code.";
+}
+
+// initialise Bluetooth (DashCAN app) section
+function initBle() {
+  const btnForget = document.getElementById("bleForget");
+
+  btnForget.addEventListener("click", async () => {
+    const resp = await fetchJson("/api/ble/forget", { method: "POST" });
+    if (!resp) {
+      showNotification("No response from the controller", "error");
+      return;
+    }
+    if (!resp.ok) {
+      showNotification("Bluetooth is off - nothing to forget", "error");
+      return;
+    }
+    showNotification("Paired phones forgotten, new pairing code - the next phone pairs without it");
+    initStoredSettings(); // refresh the pairing line
   });
 }
 
@@ -1936,22 +2463,22 @@ function initWifi() {
 // networks that block or mangle raw.githubusercontent. Whichever answers
 // first is used for the .bin downloads too.
 // ---------------------------------------------------------------------------
-// Release source. This fork publishes its own releases, and the official
-// Forbes Automotive releases stay one switch away: picking "forbes" points the
-// updater at upstream, and installing a release from there puts the official
-// firmware back - whose own updater follows Forbes from then on. Either repo
-// must hold a Releases/releases.json; ours is generated by tools/make_release.py.
-// Kept in this browser only (localStorage), like the update channel.
-const UPD_SOURCES = {
-  fork: { repo: "louij2/OpenHaldex-C6", label: "louij2 fork" },
-  forbes: { repo: "Forbes-Automotive/OpenHaldex-C6", label: "Forbes Automotive (official)" },
-};
+// Release sources. The official Forbes Automotive releases are always listed.
+// A fork that publishes its own releases sets UPD_FORK to its repo: the OTA tab
+// then shows a "Release source" choice, and picking the official source lists
+// the official releases as a way back to the official firmware. With UPD_FORK
+// left null (as here) there is a single source and the selector stays hidden,
+// so nothing changes on screen. The choice is kept in this browser only.
+const UPD_OFFICIAL = { repo: "Forbes-Automotive/OpenHaldex-C6", label: "Forbes Automotive (official)" };
+// e.g. { repo: "someone/OpenHaldex-C6", label: "someone's fork", site: "someone.github.io/OpenHaldex-C6" }
+const UPD_FORK = { repo: "louij2/OpenHaldex-C6", label: "louij2 fork", site: "louij2.github.io/OpenHaldex-C6" };
 const UPD_SOURCE_KEY = "otaUpdateSource";
-const FORK_SITE = "louij2.github.io/OpenHaldex-C6"; // phone install guide - the way back from Forbes
-let updSource = "fork";
+let updSource = UPD_FORK ? "fork" : "official";
 const UPD_BRANCH = "main";
-function updRepo() { return (UPD_SOURCES[updSource] || UPD_SOURCES.fork).repo; }
-function updIsForbes() { return updSource === "forbes"; }
+function updRepo() { return (updSource === "fork" && UPD_FORK ? UPD_FORK : UPD_OFFICIAL).repo; }
+// True only on a fork build with the official source picked: installing from
+// there switches back to the official firmware rather than updating the fork.
+function updSwitchingToOfficial() { return !!UPD_FORK && updSource === "official"; }
 function updMirrors() {
   return [
     { name: "GitHub", base: "https://raw.githubusercontent.com/" + updRepo() + "/" + UPD_BRANCH + "/Releases/" },
@@ -1959,16 +2486,6 @@ function updMirrors() {
   ];
 }
 function updDirApi() { return "https://api.github.com/repos/" + updRepo() + "/contents/Releases?ref=" + UPD_BRANCH; }
-// This build's partition sizes (src/partitions_4mb.csv - this fork keeps the
-// pre-Bluetooth layout). A partition table can't change over the air, so a
-// release whose images don't fit is not offered: upstream 9.00.5+ needs
-// 0x1C0000 app slots and would fail here after its web UI had been written.
-const UPD_APP_SLOT_BYTES = 0x1A0000;
-const UPD_FS_PART_BYTES = 0xB0000;
-function updFitsThisLayout(r) {
-  const fw = r && r.firmware && r.firmware.size, fs = r && r.filesystem && r.filesystem.size;
-  return !(fw > UPD_APP_SLOT_BYTES) && !(fs > UPD_FS_PART_BYTES);
-}
 // Update channel. Everything is published on one branch - main is the live
 // development branch and Releases/ holds the stable-ish cut - so the channel
 // changes which builds are *offered*, not where they are fetched from.
@@ -1980,6 +2497,23 @@ let updChannel = "stable";
 const UPD_FOLDER_RE = /^V(\d+(?:\.\d+)*)$/i;
 // Mirror that last answered - the .bin downloads follow the index.
 let UPD_RELEASES_BASE = updMirrors()[0].base;
+
+// This build's partition sizes (src/partitions_4mb.csv). A partition table
+// can't change over the air, so a release whose images are bigger than these
+// needs a USB flash and is not offered here - e.g. 9.00.0 and older, whose
+// 0xB0000 web UI image won't fit the 0x70000 space since 9.00.5 (V10.00.2,
+// from PR #54). Uses the sizes in releases.json.
+const UPD_APP_SLOT_BYTES = 0x1C0000;
+const UPD_FS_PART_BYTES = 0x70000;
+function updFitsThisLayout(release) {
+  if (release.firmware.size > UPD_APP_SLOT_BYTES) {
+    return false; // firmware too big for the app slot
+  }
+  if (release.filesystem.size > UPD_FS_PART_BYTES) {
+    return false; // web UI image too big for the LittleFS space
+  }
+  return true;
+}
 
 // numeric compare of "x.yy.z" strings: >0 if a newer than b
 function updCompareVersions(a, b) {
@@ -2043,8 +2577,8 @@ function initUpdateCheck() {
     return index.releases.filter((r) => r && r.ota && r.firmware && r.filesystem && updFitsThisLayout(r));
   }
 
-  // Switching back to Forbes: the newest stable official release that fits
-  // this unit's partitions (Forbes' "latest" may need a USB flash).
+  // Switching back to the official firmware: the newest stable official
+  // release that fits this unit's partitions (the index's "latest" may not).
   function officialTarget() {
     const c = otaCandidates().filter((r) => r.channel !== "beta").sort((a, b) => updCompareVersions(b.version, a.version));
     return c.length ? c[0].version : "";
@@ -2053,13 +2587,11 @@ function initUpdateCheck() {
   function renderPicker() {
     const cur = installed();
     const all = showAll && showAll.checked;
-    // From the Forbes source every stable release is a switch back to the
-    // official firmware, so the "newer than installed" rule does not apply.
-    // Switching back to Forbes, the newest compatible official release is the
-    // target; older ones stay behind "Show beta / older versions".
-    const target = updIsForbes() ? officialTarget() : "";
+    // Switching back to the official firmware, the newest compatible official
+    // release is the target; older ones stay behind "Show beta / older".
+    const target = updSwitchingToOfficial() ? officialTarget() : "";
     const list = otaCandidates().filter((r) => all || (r.channel !== "beta" &&
-      (updIsForbes() ? r.version === target : updCompareVersions(r.version, cur) >= 0)));
+      (updSwitchingToOfficial() ? r.version === target : updCompareVersions(r.version, cur) >= 0)));
     // Nothing extra to add on "latest": the >= 0 compare above already keeps
     // the installed version in the list, which is what makes a rebuild of it
     // installable. The channel only changes the wording and the rebuild check.
@@ -2073,7 +2605,7 @@ function initUpdateCheck() {
       if (r.channel === "beta") tags.push("beta");
       if (r.unindexed) tags.push("not in index");
       const c = updCompareVersions(r.version, cur);
-      if (updIsForbes()) tags.push("official");
+      if (updSwitchingToOfficial()) tags.push("official");
       else if (c === 0) tags.push("installed");
       else if (c < 0) tags.push("rollback");
       o.textContent = "v" + r.version + (tags.length ? " (" + tags.join(", ") + ")" : "");
@@ -2100,7 +2632,7 @@ function initUpdateCheck() {
   function renderNotes() {
     const r = selected();
     notes.textContent = r ? ((r.date ? r.date + " — " : "") + (r.notes || "")) : "";
-    if (installBtn) installBtn.textContent = r && updIsForbes() ? "Switch to official v" + r.version
+    if (installBtn) installBtn.textContent = r && updSwitchingToOfficial() ? "Switch to official v" + r.version
       : r && updCompareVersions(r.version, installed()) < 0 ? "Roll back to v" + r.version : "Install v" + (r ? r.version : "");
   }
 
@@ -2180,17 +2712,15 @@ function initUpdateCheck() {
     try { sta = await fetchJson("/api/wifi/sta"); } catch (e) { /* advice below still stands */ }
     const why = detail ? " (" + detail + ")" : "";
     if (sta && sta.ssid && sta.connected) {
-      return ["This browser has no internet" + why + ". The controller is already on “" + sta.ssid + "” at http://" + sta.ip +
-        "/ - join this phone to “" + sta.ssid + "”, open http://" + sta.ip + "/ (or http://openhaldex.local/), come back to this tab and press Retry.", false];
+      return ["No internet" + why + ". The controller is on “" + sta.ssid + "”: join this phone to it, open http://" + sta.ip +
+        "/ and press Retry.", false];
     }
     if (sta && sta.ssid) {
-      return ["This browser has no internet" + why + ". The controller is set up for “" + sta.ssid + "” but isn't connected right now - " +
-        "out of range, wrong password, or still trying (it retries every 5 minutes). Check the Home WiFi card below (Save & Apply " +
-        "reconnects straight away), then join this phone to the same network, open the address the card shows and press Retry.", true];
+      return ["No internet" + why + ". The controller isn't connected to “" + sta.ssid + "” (out of range or wrong password). " +
+        "Check Home WiFi below, then join this phone to the same network, open the address shown and press Retry.", true];
     }
-    return ["This browser has no internet while on the OpenHaldex WiFi" + why + ". Connect the controller to your home router in the " +
-      "Home WiFi (Bridge Mode) card below, join this phone to that same network, open the address the card shows and press Retry. " +
-      "No router available? Use “Update from Files” below - it needs no internet here.", true];
+    return ["No internet on the OpenHaldex WiFi" + why + ". Connect the controller to your router under Home WiFi below, join this " +
+      "phone to the same network, open the address shown and press Retry. No router? Use “Update from Files”.", true];
   }
 
   async function check() {
@@ -2220,9 +2750,8 @@ function initUpdateCheck() {
     } catch (e) { /* unreachable - handled below */ }
     if (!info || !info.version) {
       setState("Controller unreachable", "upd-bad");
-      setStatus("Can't reach the controller from this browser (gave up after " + secs() + "). Stay on the OpenHaldex‑C6 WiFi - or, if you're using the home router, " +
-        "make sure the Home WiFi card shows Connected and that you opened this page at the address it gives. The controller also " +
-        "switches WiFi off after 5 minutes with no CAN traffic unless Bench Mode is on. Then press Retry.", "error");
+      setStatus("Can't reach the controller (gave up after " + secs() + "). Stay on the OpenHaldex WiFi, or check Home WiFi shows " +
+        "Connected and you're on the address it gives. WiFi turns off after 5 min without CAN unless Bench Mode is on.", "error");
       finish(false);
       return;
     }
@@ -2242,8 +2771,8 @@ function initUpdateCheck() {
       // is fine and the published files are the problem.
       if (ir.reached || fr.reached) {
         setState("Release list unavailable", "upd-bad");
-        setStatus("The phone is online but the release list could not be read: " + (ir.reached || fr.reached) +
-          ". Nothing is wrong with the controller or the phone - the published releases are missing or broken. Use “Update from Files” below.", "error");
+        setStatus("Release list unreadable: " + (ir.reached || fr.reached) + ". The published files are the problem, not this " +
+          "device. Use “Update from Files”.", "error");
         finish(false);
       } else {
         setState("No internet access", "upd-bad");
@@ -2261,8 +2790,8 @@ function initUpdateCheck() {
     const c = updCompareVersions(latest, cur);
     const srcNote = !ir.index ? " (release index unavailable - folder listing only, no release notes)"
       : !fr.dirs ? " (folder listing unavailable - " + (fr.reached || fr.netErr || "no answer") + "; showing the index only)" : "";
-    const via = " Release list from " + (updIsForbes() ? "Forbes Automotive via " : "") + updMirrors().filter((m) => m.base === UPD_RELEASES_BASE).map((m) => m.name).join("") + " in " + secs() + ".";
-    if (updIsForbes()) {
+    const via = " Release list from " + (updSwitchingToOfficial() ? "Forbes Automotive via " : "") + updMirrors().filter((m) => m.base === UPD_RELEASES_BASE).map((m) => m.name).join("") + " in " + secs() + ".";
+    if (updSwitchingToOfficial()) {
       const target = officialTarget();
       set("updLatest", target ? "v" + target : "--");
       if (!target) {
@@ -2283,7 +2812,7 @@ function initUpdateCheck() {
     else if (c === 0) { setState("Up to date", "upd-current"); setStatus("You are on the latest release." + srcNote + via); }
     else { setState("Ahead of release", "upd-current"); setStatus("Installed v" + cur + " is newer than the published v" + latest + "." + srcNote + via); }
     renderPicker();
-    if (!updIsForbes() && updChannel === "latest" && index.releases && index.releases.length) {
+    if (!updSwitchingToOfficial() && updChannel === "latest" && index.releases && index.releases.length) {
       const newest = otaCandidates().find((r) => r.version === index.latest);
       if (newest) {
         const rb = await rebuiltSinceIndexed(newest);
@@ -2332,7 +2861,7 @@ function initUpdateCheck() {
     // Not every mirror sends Content-Length (jsDelivr may not); never guess.
     if (!len) return { unknown: "this mirror does not report a size" };
     if (len !== want) return { changed: true, published: len, indexed: want };
-    return { unknown: "the firmware is the size the index expects, which does not rule out a rebuild" };
+    return { unknown: "same size as indexed, may still be a rebuild" };
   }
 
   // streamed download with progress; returns a Blob and checks size when known
@@ -2405,14 +2934,14 @@ function initUpdateCheck() {
             setTimeout(() => location.reload(), 2500);
           } else {
             setState("Rolled back", "upd-bad");
-            setStatus("Device came back on v" + i.version + " instead of v" + rel.version + " - the new image was rejected or rolled back. Try again or use “Update from Files”.", "error");
+            setStatus("Came back on v" + i.version + ", not v" + rel.version + ": the new image was rolled back. Try again or use “Update from Files”.", "error");
           }
           return;
         }
       } catch (e) { /* still rebooting - AP may drop and rejoin, or the home router lease takes a moment */ }
       await new Promise((r) => setTimeout(r, 2000));
     }
-    setStatus("Device didn't respond within 90 s. Reconnect to the OpenHaldex WiFi (or the home network) and reload this page.", "error");
+    setStatus("No response within 90 s. Reconnect to the OpenHaldex WiFi and reload.", "error");
   }
 
   // Install sequence for a release from the list: web UI first (downloaded,
@@ -2458,8 +2987,8 @@ function initUpdateCheck() {
       if (stage === "fs" || stage === "verify") {
         // The device wipes a rejected filesystem image, so the firmware keeps
         // running but this web UI is gone until littlefs.bin goes on again.
-        msg += " The controller is still running v" + installed() + "; the web UI partition was cleared. Press Install again " +
-          "(or upload littlefs.bin under “Update from Files”). If this page won't load, the controller now shows a recovery page at its address.";
+        msg += " Still running v" + installed() + " but the web UI was cleared. Press Install again or upload littlefs.bin " +
+          "under “Update from Files”. If the page won't load, the controller serves a recovery page.";
       }
       setStatus(msg, "error");
       if (wrap) wrap.hidden = true;
@@ -2477,19 +3006,15 @@ function initUpdateCheck() {
     const cur = installed();
     const dir = updCompareVersions(rel.version, cur);
     const what = dir < 0 ? "roll back to v" + rel.version : (dir === 0 ? "re-install v" + rel.version : "update to v" + rel.version);
-    let msg = "This will " + what + " (currently v" + cur + ").\n\nThe web UI is replaced first, then the firmware, then the device reboots. Keep this page open.";
-    if (dir < 0) msg += "\n\nRolling back: older releases may not have this update page, so coming forward again could mean a USB flash. Settings may also be reset - export a backup first (Diagnostics tab).";
-    if (dir === 0) {
-      msg += "\n\nSame version number: this re-downloads whatever is published under v" + rel.version + " right now. If that " +
-        "build was rebuilt after release it will bring the newer code in; if it was not, you end up back where you started. " +
-        "It is not a published release in its own right, so export a settings backup first (Diagnostics tab).";
-    }
-    if (updIsForbes()) {
+    let msg = "This will " + what + " (currently v" + cur + "). Keep this page open until it reboots.";
+    if (dir < 0) msg += "\n\nOlder releases may lack this update page, so updating again could need USB. Export a backup first.";
+    if (dir === 0) msg += "\n\nRe-downloads whatever is published as v" + rel.version + " now. Export a backup first.";
+    if (updSwitchingToOfficial()) {
+      const back = UPD_FORK.site ? "open " + UPD_FORK.site + " on your phone" : "install it again with Update from Files";
       msg = "This switches the controller back to the official Forbes Automotive firmware, v" + rel.version +
-        " (currently v" + cur + " from the louij2 fork).\n\nThe web UI is replaced first, then the firmware, then the device " +
-        "reboots. Keep this page open.\n\nAfterwards the controller's update page follows Forbes releases only, and this fork's " +
-        "additions are gone. To come back to the fork later, open " + FORK_SITE + " on your phone. Settings normally " +
-        "carry over, but export a backup first (Settings tab).";
+        " (currently v" + cur + " from " + UPD_FORK.label + ").\n\nThe web UI is replaced first, then the firmware, then " +
+        "the device reboots. Keep this page open.\n\nAfterwards the update page follows the official releases only. To go " +
+        "back to " + UPD_FORK.label + " later, " + back + ". Settings normally carry over, but export a backup first.";
     }
     if (!confirm(msg + "\n\nContinue?")) return;
     rel._blobs = {};
@@ -2497,30 +3022,37 @@ function initUpdateCheck() {
   }
 
   // --- release source -----------------------------------------------------
-  const srcSel = $("updSource"), srcHint = $("updSourceHint"), chanGroup = $("updChannelGroup");
+  // Only shown on a fork build (UPD_FORK set); with the official repo alone
+  // there is nothing to choose and the group stays hidden.
+  const srcGroup = $("updSourceGroup"), srcSel = $("updSource"), srcHint = $("updSourceHint"), chanGroup = $("updChannelGroup");
   function renderSource() {
     if (srcSel) srcSel.value = updSource;
-    // The channel is this fork's concept (in-place rebuilds of our releases).
-    if (chanGroup) chanGroup.hidden = updIsForbes();
+    // The update channel describes the source's own in-place rebuilds; it does
+    // not apply while switching back to the official releases.
+    if (chanGroup) chanGroup.hidden = updSwitchingToOfficial();
     if (!srcHint) return;
-    if (updIsForbes()) {
-      srcHint.textContent = "Showing the official Forbes Automotive releases. Installing one switches this controller back " +
-        "to the official firmware; its update page then follows Forbes only. To return to this fork later, open " +
-        FORK_SITE + " on your phone.";
-      srcHint.hidden = false;
-    } else {
-      srcHint.hidden = true;
-    }
+    srcHint.textContent = updSwitchingToOfficial()
+      ? "Showing the official Forbes Automotive releases. Installing one switches this controller back to the official firmware."
+      : "";
+    srcHint.hidden = !updSwitchingToOfficial();
   }
-  try {
-    const saved = localStorage.getItem(UPD_SOURCE_KEY);
-    if (saved === "forbes" || saved === "fork") updSource = saved;
-  } catch (e) { /* private mode - stay on the fork */ }
-  UPD_RELEASES_BASE = updMirrors()[0].base;
-  renderSource();
-  if (srcSel) {
+  if (UPD_FORK && srcGroup && srcSel) {
+    srcSel.innerHTML = "";
+    [["fork", UPD_FORK.label + " (this firmware)"], ["official", UPD_OFFICIAL.label]].forEach(([v, t]) => {
+      const o = document.createElement("option");
+      o.value = v;
+      o.textContent = t;
+      srcSel.appendChild(o);
+    });
+    try {
+      const saved = localStorage.getItem(UPD_SOURCE_KEY);
+      if (saved === "official" || saved === "fork") updSource = saved;
+    } catch (e) { /* private mode - stay on the fork */ }
+    UPD_RELEASES_BASE = updMirrors()[0].base;
+    srcGroup.hidden = false;
+    renderSource();
     srcSel.addEventListener("change", () => {
-      updSource = srcSel.value === "forbes" ? "forbes" : "fork";
+      updSource = srcSel.value === "official" ? "official" : "fork";
       try { localStorage.setItem(UPD_SOURCE_KEY, updSource); } catch (e) { /* not fatal */ }
       UPD_RELEASES_BASE = updMirrors()[0].base;
       renderSource();
@@ -2528,8 +3060,8 @@ function initUpdateCheck() {
       picker.hidden = true;
       resetSteps();
       setState("Not checked");
-      setStatus(updIsForbes() ? "Official Forbes Automotive releases selected. Press Check for updates."
-        : "louij2 fork releases selected. Press Check for updates.");
+      setStatus(updSwitchingToOfficial() ? "Official Forbes Automotive releases selected. Press Check for updates."
+        : UPD_FORK.label + " releases selected. Press Check for updates.");
       checkBtn.textContent = "Check for updates";
       if (bridgeBtn) bridgeBtn.hidden = true;
     });
@@ -2545,10 +3077,8 @@ function initUpdateCheck() {
     if (chanSel) chanSel.value = updChannel;
     if (!chanHint) return;
     if (updChannel === "latest") {
-      chanHint.textContent = "main is the live development branch: when a fix lands before the next version is cut, the newest " +
-        "release folder is rebuilt in place under the same version number. On this channel the newest release stays installable " +
-        "even when its version matches what you already have, and a check reports whether it has been rebuilt since it was " +
-        "indexed. These builds have not been through a release - keep a settings backup (Diagnostics tab).";
+      chanHint.textContent = "Development builds: the newest release can be rebuilt under the same version number, so it stays " +
+        "installable. Not fully released; keep a settings backup.";
       chanHint.hidden = false;
     } else {
       chanHint.hidden = true;
@@ -2865,15 +3395,18 @@ function initWifiSta(prefix) {
 // ---------------------------------------------------------------------------
 const BACKUP_GENERAL_KEYS = [
   "haldexGeneration", "isStandalone", "useCANifAvailable", "broadcastOpenHaldexOverCAN", "disableController",
+  "espNowEnabled", "espNowControl", "canRelay",
   "disengageUnderSpeed", "disengageAboveSpeed", "disableThrottle",
   "tcForceMode", "tcForceModeValue", "hazardForceMode", "hazardForceModeValue",
-  "extButtonForceMode", "extBtnForceModeValue", "disableOnboardButton", "disableExternalButton",
-  "followBrake", "invertBrake", "followHandbrake", "invertHandbrake",
+  "extButtonForceMode", "extBtnForceModeValue", "forceModesPriority", "driveModeForce", "driveModeForceValues",
+  "disableOnboardButton", "disableExternalButton",
+  "followBrake", "invertBrake", "followHandbrake", "invertHandbrake", "followABS",
+  "volvoP1LockSource", "volvoP1RoadSpeedKmh", "volvoP1Gear", "volvoP1TorqueFull", "volvoP1SlipFullKmh",
   "fixHunting", "dangerZoneEnabled", "esp14MinFloorPct", "bpkCeilingNm",
-  "steeringScaleEnabled", "liveDiagEnabled", "ledBrightness",
+  "steeringScaleEnabled", "lockReleaseEnabled", "lockReleaseRatePerSec", "liveDiagEnabled", "ledBrightness",
   "slipWheelbaseMm", "slipTrackFrontMm", "slipTrackRearMm", "slipSteeringRatio",
   "canSleepEnabled", "canSleepAggressive", "benchMode", "lpWakeThresholdFps",
-  "longLearnNotes",
+  "longLearnNotes", "bleEnabled",
 ];
 
 function initBackupRestore() {
@@ -3077,6 +3610,8 @@ const GAUGE_TILES = [
   { id: "throttle",         label: "Throttle",     min: 0, max: 100,  unit: "%" },
   { id: "rpm",              label: "RPM",          min: 0, max: 8000, unit: "rpm" },
   { id: "boost",            label: "Boost",        min: 0, max: 2500, unit: "mbar" },
+  { id: "coolantTemp",      label: "Coolant Temp", min: 0, max: 150,  unit: "°C" },
+  { id: "oilTemp",          label: "Oil Temp",     min: 0, max: 160,  unit: "°C" },
   { id: "haldexEngagement", label: "Engagement",   min: 0, max: 100,  unit: "%" },
   { id: "clutch1Report",    label: "Clutch 1",     min: 0, max: 255,  unit: "" },
   { id: "clutch2Report",    label: "Clutch 2",     min: 0, max: 255,  unit: "" },
@@ -3106,7 +3641,10 @@ const GAUGE_DEFAULTS = {
   tiles: ["speed", "throttle", "rpm", "boost"],
   engagement: true,
   trace: true,
+  liveRefreshMs: 500, // Live Data Refresh: 500 = same as the rest of the page (V11.00.4)
 };
+
+const LIVE_REFRESH_CHOICES = [500, 250, 200, 100]; // the rates offered in Display Options, in ms
 
 let gaugePrefs = loadGaugePrefs();
 
@@ -3119,6 +3657,7 @@ function loadGaugePrefs() {
         tiles: Array.isArray(p.tiles) ? p.tiles : GAUGE_DEFAULTS.tiles.slice(),
         engagement: p.engagement !== undefined ? !!p.engagement : GAUGE_DEFAULTS.engagement,
         trace: p.trace !== undefined ? !!p.trace : GAUGE_DEFAULTS.trace,
+        liveRefreshMs: LIVE_REFRESH_CHOICES.includes(p.liveRefreshMs) ? p.liveRefreshMs : GAUGE_DEFAULTS.liveRefreshMs,
       };
     }
   } catch (e) {
@@ -3128,6 +3667,7 @@ function loadGaugePrefs() {
     tiles: GAUGE_DEFAULTS.tiles.slice(),
     engagement: GAUGE_DEFAULTS.engagement,
     trace: GAUGE_DEFAULTS.trace,
+    liveRefreshMs: GAUGE_DEFAULTS.liveRefreshMs,
   };
 }
 
@@ -3216,41 +3756,134 @@ function updateTileGauges() {
   });
 }
 
-// Explain a withheld lock. The device reports which of the three gates in the
-// speed/throttle window is blocking (lockGateReasons); naming the setting and
-// its configured value is the difference between "it is broken" and "turn this
-// down". Hidden whenever nothing is blocking.
-// The configured limit is read back off the Settings sliders, which
-// initStoredSettings() populates from /api/settings and keeps in sync - there is
-// no cached settings object to consult. Missing element -> bare reason, no value.
-const gateLimit = (id, unit) => {
-  const el = document.getElementById(id);
-  return el && el.value !== "" ? ` (${el.value}${unit})` : "";
-};
+// The value a Basic-tab slider is set to, as " (20 km/h)", or "" if the
+// slider isn't on the page.
+function lockGateLimitText(sliderId, unit) {
+  const slider = document.getElementById(sliderId);
+  if (!slider || slider.value === "") {
+    return "";
+  }
+  return " (" + slider.value + unit + ")";
+}
 
-const LOCK_GATE_TEXT = {
-  throttle: () =>
-    `throttle is below "Minimum Throttle Before Lock"${gateLimit("disableThrottleRange", "%")}`,
-  underSpeed: () =>
-    `speed is below "Disengage Under Speed"${gateLimit("disengageUnderSpeedRange", " km/h")}`,
-  aboveSpeed: () =>
-    `speed is above "Disengage Above Speed"${gateLimit("disengageAboveSpeedRange", " km/h")}`,
-};
+// One reason from the dashboard's lockGateReasons list, in plain words.
+function lockGateReasonText(reason) {
+  if (reason === "throttle") {
+    return 'throttle is below "Minimum Throttle Before Lock"' + lockGateLimitText("disableThrottleRange", "%");
+  } else if (reason === "underSpeed") {
+    return 'speed is below "Disengage Under Speed"' + lockGateLimitText("disengageUnderSpeedRange", " km/h");
+  } else if (reason === "aboveSpeed") {
+    return 'speed is above "Disengage Above Speed"' + lockGateLimitText("disengageAboveSpeedRange", " km/h");
+  } else if (reason === "handbrake") {
+    return 'the handbrake is on ("Follow Handbrake")';
+  } else if (reason === "abs") {
+    return 'the ABS is braking ("Follow ABS")';
+  }
+  return reason; // a reason this page doesn't know yet: show it as sent
+}
 
-function updateLockGateHint(data) {
-  const el = document.getElementById("lockGateHint");
-  if (!el) return;
-  const reasons = Array.isArray(data.lockGateReasons) ? data.lockGateReasons : [];
-  if (!data.lockGated || !reasons.length) {
-    el.hidden = true;
-    el.textContent = "";
+// One Haldex health bit as "On" / "Off", or "--" when there's no data or this
+// generation's feedback doesn't carry health bits we know (V11.00.0).
+function healthOnOff(value, supported) {
+  if (supported === false) {
+    return "--";
+  }
+  if (value === undefined || value === null) {
+    return "--";
+  }
+  if (value) {
+    return "On";
+  }
+  return "Off";
+}
+
+// The Haldex's own warnings (V11.00.0), named in plain words. These come from
+// the unit itself - over-temperature, faults, limp - and are never hidden.
+function haldexWarningText(warning) {
+  if (warning === "fault") {
+    return "the Haldex reports a fault (clutch / pump / valve)";
+  } else if (warning === "plausibility") {
+    return "the Haldex reports a signal plausibility fault";
+  } else if (warning === "overTemp") {
+    return "over-temperature protection is active - the Haldex is pulling the clutch back to cool down";
+  } else if (warning === "limp") {
+    return "the Haldex is in limp mode";
+  } else if (warning === "lamp") {
+    return "the Haldex is asking for the AWD warning lamp";
+  } else if (warning === "tempSensor") {
+    return "the Haldex temperature sensor has failed";
+  } else if (warning === "faultStored") {
+    return "a fault is stored in the Haldex (scan it with VCDS / ODIS)";
+  }
+  return warning; // a warning this page doesn't know yet: show it as sent
+}
+
+// Show or hide the red Haldex Warning card on the dashboard.
+function updateHaldexWarnings(data) {
+  const card = document.getElementById("haldexWarningCard");
+  const text = document.getElementById("haldexWarningText");
+  if (!card || !text) {
     return;
   }
-  const parts = reasons.map((r) => (LOCK_GATE_TEXT[r] ? LOCK_GATE_TEXT[r]() : r));
-  el.textContent =
-    `Lock is being held at 0% because ${parts.join(" and ")}. ` +
-    `Set the limit to 0 in Settings to disable that cut-off.`;
-  el.hidden = false;
+
+  let warnings = [];
+  if (Array.isArray(data.haldexWarnings)) {
+    warnings = data.haldexWarnings;
+  }
+
+  if (warnings.length === 0) {
+    card.hidden = true;
+    text.textContent = "";
+    return;
+  }
+
+  const parts = [];
+  for (let i = 0; i < warnings.length; i++) {
+    parts.push(haldexWarningText(warnings[i]));
+  }
+  let message = parts.join("; ") + ".";
+  if (data.haldexTempC !== null && data.haldexTempC !== undefined) {
+    message = message + " Haldex temperature " + data.haldexTempC + " °C.";
+  }
+  text.textContent = message.charAt(0).toUpperCase() + message.slice(1);
+  card.hidden = false;
+}
+
+// Under the Haldex Engagement figures, say which speed / throttle setting is
+// holding lock at 0% (V10.00.2, from PR #54). Since 9.00.0 these settings cut
+// lock in every mode, force triggers included, so an old non-zero setting
+// could look like "FWD in every mode". Hidden when nothing is blocking.
+function updateLockGateHint(data) {
+  const hint = document.getElementById("lockGateHint");
+  if (!hint) {
+    return;
+  }
+
+  let reasons = [];
+  if (Array.isArray(data.lockGateReasons)) {
+    reasons = data.lockGateReasons;
+  }
+
+  if (!data.lockGated || reasons.length === 0) {
+    hint.hidden = true;
+    hint.textContent = "";
+    return;
+  }
+
+  const parts = [];
+  let hasSpeedOrThrottleLimit = false; // only those three can be turned off on the Basic tab
+  for (let i = 0; i < reasons.length; i++) {
+    parts.push(lockGateReasonText(reasons[i]));
+    if (reasons[i] === "throttle" || reasons[i] === "underSpeed" || reasons[i] === "aboveSpeed") {
+      hasSpeedOrThrottleLimit = true;
+    }
+  }
+  let message = "Lock is being held at 0% because " + parts.join(" and ") + ".";
+  if (hasSpeedOrThrottleLimit) {
+    message = message + " Set that limit to 0 on the Basic tab to turn the cut-off off.";
+  }
+  hint.textContent = message;
+  hint.hidden = false;
 }
 
 // Semi-circular engagement gauge: the fill sweeps with ACTUAL engagement, the
@@ -3703,6 +4336,15 @@ function initGaugeUI() {
       applyGaugePrefs();
     });
   }
+  const liveRefreshSelect = document.getElementById("optLiveRefresh");
+  if (liveRefreshSelect) {
+    liveRefreshSelect.value = String(gaugePrefs.liveRefreshMs);
+    liveRefreshSelect.addEventListener("change", () => {
+      gaugePrefs.liveRefreshMs = Number(liveRefreshSelect.value);
+      saveGaugePrefs();
+      startLiveRefresh(); // switch to the new rate straight away
+    });
+  }
 
   applyGaugePrefs();
   renderLockTrace(Date.now());
@@ -3851,4 +4493,3 @@ function initDtc() {
   });
   fetchJson("/api/dtc", { cache: "no-store" }).then(render);
 }
-

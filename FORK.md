@@ -15,10 +15,13 @@ done its job.
 - **The OTA updater points at this repo** (`UPD_REPO` in `data/app.js`). A
   device running this firmware is offered this fork's releases. Point
   `UPD_REPO` back at `Forbes-Automotive/OpenHaldex-C6` to track upstream.
-- **Versions use the middle field**: `9.10.0`, `9.11.0` for features, `9.10.1`
-  for fixes. Upstream numbers releases `X.00.Y`, so ours sort above the
-  upstream cut they branched from and cannot collide. Digits and dots only —
-  the updater's folder regex rejects any suffix.
+- **Versions use the middle field** of the upstream release we are built on:
+  `11.10.0` = upstream 11.00.x plus this fork's features, `11.10.1` for fixes,
+  `11.11.0` for the next feature. Upstream numbers releases `X.00.Y`, so ours
+  sort above the upstream cut we are based on and cannot collide. Digits and
+  dots only - the updater's folder regex rejects any suffix. (Before 11.10.0
+  the fork was based on 9.00.x and numbered 9.10-9.14 on the old partition
+  layout; moving to 11.10.0 needs one USB flash.)
 - **Releases are built in CI from a tag**, so the binaries and the index that
   describes them come out of one run.
 - The four carried-over PRs: CLI legacy backup key, favicon + PWA branding,
