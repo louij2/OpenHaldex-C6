@@ -100,6 +100,11 @@ uint16_t received_vehicle_boost;
 float receivedCoolantTemp = 0.0f; // engine coolant temperature (degC), from PQ Kombi_2
 float receivedOilTemp = 0.0f;     // engine oil temperature (degC), from PQ Kombi_2
 uint32_t lastKombi2Ms = 0;        // when the last Kombi_2 came in; 0 = never
+float receivedIntakeTemp = 0.0f;  // intake air temperature (degC), from PQ Motor_3
+uint32_t lastMotor3Ms = 0;        // when the last Motor_3 came in; 0 = never
+float receivedEngineTorquePct = 0.0f; // indicated engine torque (% of reference), from PQ Motor_1
+uint16_t receivedRefTorqueNm = 0;  // reference torque (Nm), from PQ Motor_2 mux 3; 0 = not seen yet
+bool receivedBoostClipped = false; // PQ Motor_7 boost is at the top of its 8-bit range
 uint8_t haldexGeneration;
 uint8_t tcForceModeValue     = 2; // default 50:50
 uint8_t hazardForceModeValue = 2; // default 50:50

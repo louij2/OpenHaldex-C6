@@ -128,6 +128,42 @@ static void addEngineTemps(JsonDocument &data)
     }
 }
 
+// Intake temp (PQ Motor_3), engine torque (PQ Motor_1 % x Motor_2 reference) and
+// whether the PQ Motor_7 boost value is at the top of its range. null ("--") when
+// unknown. Receive-only: nothing here asks the engine ECU for anything.
+static void addEngineBroadcasts(JsonDocument &data)
+{
+    uint32_t lastSeenMs = lastMotor3Ms; // copy first, then read the clock (the CAN task can change it)
+    if (lastSeenMs != 0 && (millis() - lastSeenMs) <= MOTOR3_TIMEOUT_MS)
+    {
+        data["iat"] = (int)lroundf(receivedIntakeTemp);
+    }
+    else
+    {
+        data["iat"] = nullptr;
+    }
+
+    if (hasCANChassis)
+    {
+        data["torquePct"] = (int)lroundf(receivedEngineTorquePct);
+        if (receivedRefTorqueNm != 0)
+        {
+            data["torqueNm"] = (int)lroundf(receivedEngineTorquePct * receivedRefTorqueNm / 100.0f);
+        }
+        else
+        {
+            data["torqueNm"] = nullptr;
+        }
+        data["boostClipped"] = receivedBoostClipped;
+    }
+    else
+    {
+        data["torquePct"] = nullptr;
+        data["torqueNm"] = nullptr;
+        data["boostClipped"] = nullptr;
+    }
+}
+
 // GET /api/live (V11.00.4) - only the dashboard's Live Data tiles and the lock.
 // Much smaller than /api/dashboard, so the page can ask for it up to 10 times a
 // second (Display Options > Live Data Refresh) without loading the controller.
@@ -150,6 +186,7 @@ static void liveOutgoing(AsyncWebServerRequest *request)
         data["boost"] = nullptr;
     }
     addEngineTemps(data);
+    addEngineBroadcasts(data);
 
     data["lockTarget"] = int(lock_target);
     if (hasCANHaldex) // Haldex CAN ok: what the Haldex reports back
@@ -224,6 +261,7 @@ static void statusOutgoing(AsyncWebServerRequest *request)
         data["boost"] = nullptr;
     }
     addEngineTemps(data); // coolant / oil temp from PQ Kombi_2 (V11.00.4)
+    addEngineBroadcasts(data); // intake temp, torque, boost clip from PQ Motor_1/2/3/7
 
     data["brakeIn"] = brakeSignalActive;
     data["brakeOut"] = brakeActive;
