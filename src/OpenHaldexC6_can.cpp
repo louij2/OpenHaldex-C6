@@ -648,6 +648,20 @@ void parseCAN_chs(void *arg)
           // Capture pedal % (data[5] * 0.4) and engine RPM (LE 16-bit * 0.25).
           received_pedal_value = rx_message_chs.data[5] * 0.4;
           received_vehicle_rpm = ((rx_message_chs.data[3] << 8) | rx_message_chs.data[2]) * 0.25;
+          receivedEngineTorquePct = rx_message_chs.data[1] * 0.39f; // byte 1: inneres_Motor_Moment
+          break;
+
+        case MOTOR3_ID:
+          // PQ Motor_3 (0x380) - engine ECU broadcast (vw_pq.dbc MO3_Offsentemp, opendbc
+          // Ansauglufttemperatur):
+          //   SG_ : 8|8@1+ (0.75,-48) -> byte 1, intake air temp = raw x 0.75 - 48 degC
+          // Gated to the PQ generations like Kombi_2 below.
+          if ((haldexGeneration == 1 || haldexGeneration == 2 || haldexGeneration == 4 || haldexGeneration == 51) &&
+              rx_message_chs.data_length_code >= 2)
+          {
+            receivedIntakeTemp = rx_message_chs.data[1] * 0.75f - 48.0f;
+            lastMotor3Ms = millis();
+          }
           break;
 
         case MOTOR2_ID:
@@ -666,6 +680,13 @@ void parseCAN_chs(void *arg)
           // Captured for diag display and as the source for the optional
           // followBrake / invertBrake CAN override applied before forwarding.
           brakeFromCAN = bitRead(rx_message_chs.data[2], 0);
+          // Mux 3 (MO2_Mp_Code, byte 0 bits 6-7) carries the reference torque:
+          //   SG_ MO2_max_Mo m3 : 0|6@1+ (10,0) "Nm" -> byte 0 bits 0-5
+          // Motor_1's torque percentages are relative to it.
+          if ((rx_message_chs.data[0] >> 6) == 3 && (rx_message_chs.data[0] & 0x3F) != 0)
+          {
+            receivedRefTorqueNm = (rx_message_chs.data[0] & 0x3F) * 10;
+          }
           break;
 
         case ESP_05:
@@ -810,6 +831,7 @@ void parseCAN_chs(void *arg)
           //   SG_ Ladedruck (boost pressure) : 32|8@1+ (0.01,0) bar (absolute).
           // 8-bit absolute: gauge mbar = (raw * 10) - 1000 ; clamp to >=0.
           const uint8_t pq_ladedruck_raw = rx_message_chs.data[4];
+          receivedBoostClipped = (pq_ladedruck_raw >= 254); // 2.54 bar abs is the top of the range
           const int32_t boost_mbar = (int32_t)(pq_ladedruck_raw * 10.0f + 0.5f) - 1000;
           received_vehicle_boost = (boost_mbar > 0) ? (uint16_t)boost_mbar : 0;
           break;

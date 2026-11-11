@@ -295,6 +295,12 @@ extern float receivedCoolantTemp;   // engine coolant temperature in degC, from 
 extern float receivedOilTemp;       // engine oil temperature in degC, from PQ Kombi_2 (0x420) byte 3 (V11.00.4)
 extern uint32_t lastKombi2Ms;       // millis() of the last Kombi_2 frame; 0 = never seen
 #define KOMBI2_TIMEOUT_MS 2000      // no Kombi_2 for this long = temperatures unknown, shown as "--"
+extern float receivedIntakeTemp;    // intake air temperature in degC, from PQ Motor_3 (0x380) byte 1
+extern uint32_t lastMotor3Ms;       // millis() of the last Motor_3 frame; 0 = never seen
+#define MOTOR3_TIMEOUT_MS 2000      // no Motor_3 for this long = intake temp unknown, shown as "--"
+extern float receivedEngineTorquePct; // indicated engine torque in % of the reference torque, from PQ Motor_1 (0x280) byte 1
+extern uint16_t receivedRefTorqueNm;  // reference torque in Nm, from PQ Motor_2 (0x288) mux 3; 0 = not seen yet
+extern bool receivedBoostClipped;    // PQ Motor_7 boost raw >= 254: the real boost may be higher than shown
 extern uint8_t haldexGeneration;
 
 // ===== Volvo / SAAB Haldex generations (added V10.00.0) =====
